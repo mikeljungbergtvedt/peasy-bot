@@ -162,7 +162,6 @@ async function writeARValueToERP(erpId, priceMin, priceMax, heftelser, token) {
 async function fetchPendingCars() {
   console.log('Fetching pending cars from ERP...');
   const token = await getERPToken();
-  const processed = loadJSON(PROCESSED_FILE);
   const cars = [];
   for (const endpoint of ['estimating_ar_final', 'estimating_ar_temp']) {
     const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/processing/' + endpoint + '?per_page=50', { headers: { 'Authorization': 'Bearer ' + token } });
@@ -170,8 +169,8 @@ async function fetchPendingCars() {
     const data = await res.json();
     const list = data.data?.data?.data || [];
     for (const c of list) {
-      if (!c.registration_number || processed[c.registration_number]) continue;
-      cars.push({ erpId: c.id, regNr: c.registration_number, make: c.manufacturer || '', model: c.model_series || '', year: c.model_year || 0, km: c.mileage || 0, hasSdComment: c.has_sd_comment === 1 });
+      if (!c.registration_number) continue;
+      cars.push({ erpId: c.id, regNr: c.registration_number, make: c.manufacturer || '', model: c.model_series || '', year: c.model_year || 0, km: c.mileage || 0, hasSdComment: c.has_sd_comment === 1, source: c.source || '' });
     }
   }
   const seen = new Set();
@@ -401,77 +400,56 @@ const BRACKETS = [
 function getBracket(price) { return BRACKETS.find(b => price <= b.max); }
 
 function calcValuation(lowestComp) {
-  const t    = formatNOK(lowestComp * 0.88);          // dealer pays 12% below cheapest comp
-  const fee  = t >= 125000 ? 9900 : t >= 75000 ? 7900 : 5900;  // Peasy fee
-  const dLow = formatNOK(lowestComp * 0.88 * 0.95);  // shown to seller
-  const dHigh= formatNOK(lowestComp * 0.88 * 1.05);  // shown to seller
-  return { dLow, dHigh, tEstimate: t, fee, sellerT: formatNOK(t - fee) };
+  const raw  = formatNOK(lowestComp * 0.88);
+  const bud  = (lowestComp - raw) >= 10000 ? raw : lowestComp - 10000;
+  const fee  = bud >= 125000 ? 9900 : bud >= 75000 ? 7900 : 5900;
+  const dMid = bud - fee;
+  const dLow = formatNOK(dMid * 0.95);
+  const dHigh= formatNOK(dMid * 1.05);
+  return { dLow, dHigh, dMid, fee, sannsynligBud: bud };
 }
 
 function formatSingleResult(r) {
   let msg = '';
-  const results = [r];
-  for (const r of results) {
-    if (r.status === 'error') { msg += '<b>' + r.regNr + '</b> — ' + r.error + '\n\n'; continue; }
-    const { car, specs, comps, finnUrl, valuation, finnAvg, lowestComp, qa } = r;
-
-    // Section 1: Origin car
-    msg += '━━━━━━━━━━━━━━━━━━━━\n';
-    msg += '🚗 <b>' + r.regNr + ' — ' + car.make + ' ' + car.model + ' ' + car.year + '</b>\n';
-    msg += car.km.toLocaleString('nb-NO') + 'km | ' + specs.fuel + ' | ' + specs.gearbox + ' | ' + specs.drive + ' | ' + Math.round(specs.kw * 1.36) + 'hk\n';
-    msg += '━━━━━━━━━━━━━━━━━━━━\n\n';
-
-    // Section 2: Finn search params
-    msg += '🔍 <b>FINN-SØK</b>\n';
-    msg += specs.fuel + ' | ' + specs.gearbox + ' | ' + specs.drive + ' | ' + car.year + '\n';
-    msg += (r.totalCount || comps.length) + ' treff | <a href="' + finnUrl + '">Åpne søk</a>\n';
-    msg += '━━━━━━━━━━━━━━━━━━━━\n\n';
-
-    // Section 3: Finn comps
-    msg += '📊 <b>FINN KOMPS</b>\n';
-    comps.sort((a, b) => a.price - b.price).slice(0, 5).forEach((c, i) => {
-      const isAnchor = r.anchor && c.price === r.anchor.price && c.km === r.anchor.km;
-      msg += (i + 1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + 'km | ' + (c.year || '?') + (isAnchor ? ' ← anker' : '') + '\n';
-    });
-    msg += 'Snitt: <b>' + fmtNOKstr(finnAvg) + '</b>\n';
-    if (r.anchor && r.anchor.aiReason) msg += '🤖 ' + r.anchor.aiReason + '\n';
-    msg += '━━━━━━━━━━━━━━━━━━━━\n\n';
-
-    // Section 4: Valuation
-    msg += '💰 <b>KALKYLE</b>\n';
-    msg += 'Finn anker:       <b>' + r.lowestComp.toLocaleString('nb-NO') + ' kr</b>\n';
-    msg += '× 0.88 (T est):  ' + valuation.tEstimate.toLocaleString('nb-NO') + ' kr\n';
-    msg += 'Peasy fee:        ' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
-    msg += 'Selger T:         ' + valuation.sellerT.toLocaleString('nb-NO') + ' kr\n';
-    msg += '<b>D lav: ' + valuation.dLow.toLocaleString('nb-NO') + ' — D høy: ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
-    if (r.finnListing) {
-      const gap = r.finnListing.price - r.lowestComp;
-      const gapStr = gap > 0 ? '+' + Math.round(gap/1000) + 'k over' : Math.round(gap/1000) + 'k under';
-      msg += 'Finn-annonse: ✅ <a href="https://www.finn.no/mobility/search/car?q=' + car.regNr + '">' + r.finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ' anker)</a>\n';
-    } else {
-      msg += 'Finn-annonse: ❌ Ikke funnet\n';
-    }
-    msg += 'Heftelser: ' + r.heftelser + '\n';
-    if (valuation.tEstimate < 15000) msg += '⚠️ Lav økonomi — vurder manuelt\n';
-    if (r.sdComment) msg += 'Kundekommentar: ' + r.sdComment.substring(0, 300) + '\n';
-    msg += '━━━━━━━━━━━━━━━━━━━━\n\n';
-
-    // Section 5: ERP status
-    msg += '📋 <b>ERP</b>\n';
-    const hasHeftelser = r.heftelser && r.heftelser.includes('registrert');
-    if (r.finnListing) {
-      msg += '⚠️ Ikke skrevet — bil annonsert på Finn\n';
-    } else if (hasHeftelser) {
-      msg += '⚠️ Ikke skrevet — heftelser registrert\n';
-    } else if (qa && !qa.approved) {
-      msg += '⚠️ Ikke skrevet — manuell gjennomgang\n';
-      msg += 'QA: ' + qa.reason + '\n';
-    } else {
-      msg += '✅ Skrevet til ERP\n';
-      if (qa) msg += 'QA: ' + qa.reason + '\n';
-    }
-    msg += '\n';
+  if (r.status === 'error') { return '<b>' + r.regNr + '</b> — ' + r.error + '\n\n'; }
+  const { car, specs, comps, finnUrl, valuation, finnAvg, lowestComp, qa } = r;
+  const source = (car.source || '').toLowerCase();
+  const title  = source === 'driveno' ? 'DRIVE BIL TIL ESTIMERING' : 'PEASY BIL TIL ESTIMERING';
+  const isEl   = specs.fuel.toLowerCase().includes('elektr');
+  const hkStr  = isEl ? (specs.range ? specs.range + ' km rekkevidde' : specs.kw + ' kW') : Math.round((specs.kw||0)*1.36) + 'hk';
+  msg += '<b>' + title + '</b>\n';
+  msg += r.regNr + '  |  ' + car.make + ' ' + car.model + ' ' + car.year + '  |  ' + car.km.toLocaleString('nb-NO') + ' km  |  ' + specs.fuel + '  |  ' + specs.gearbox + '  |  ' + specs.drive + '  |  ' + hkStr + '\n\n';
+  msg += '<b>FINN-SOK</b>  ' + specs.fuel + '  |  ' + car.year + '  |  ' + (r.totalCount || comps.length) + ' treff  |  <a href="' + finnUrl + '">Apne sok</a>\n';
+  if (r.finnListing) {
+    const gap = r.finnListing.price - r.lowestComp;
+    const gapStr = gap >= 0 ? '+' + Math.round(gap/1000) + 'k over anker' : Math.abs(Math.round(gap/1000)) + 'k under anker';
+    msg += '   Eigen annonse: <a href="https://www.finn.no/mobility/search/car?q=' + car.regNr + '">' + r.finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ')</a>\n';
+  } else {
+    msg += '   Eigen annonse: Ikke funnet\n';
   }
+  msg += '\n';
+  comps.sort((a,b) => a.price - b.price).slice(0,5).forEach((comp,i) => {
+    const isAnker = r.anchor && comp.price === r.anchor.price && comp.km === r.anchor.km;
+    msg += (isAnker ? '> ' : '  ') + (i+1) + '.  ' + comp.price.toLocaleString('nb-NO') + ' kr  ' + comp.km.toLocaleString('nb-NO') + ' km  ' + (comp.year||'') + (isAnker ? '  <- anker' : '') + '\n';
+  });
+  msg += '   Snitt: ' + fmtNOKstr(finnAvg) + '\n\n';
+  if (r.anchor && r.anchor.aiReason) msg += '<b>AI KOMMENTAR</b>\n' + r.anchor.aiReason + '\n\n';
+  msg += '<b>KALKYLE</b>\n';
+  msg += '   Anker:          ' + r.lowestComp.toLocaleString('nb-NO') + ' kr\n';
+  msg += '   x 0.88:         ' + valuation.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
+  msg += '   Peasy fee (U): -' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
+  msg += '   D mid:          ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
+  msg += '<b>   Estimert:      ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
+  msg += '<b>HEFTELSER</b>\n   ' + r.heftelser + '\n';
+  if (valuation.dMid < 10000) msg += '   NB: Lav okonomi - vurder manuelt\n';
+  msg += '\n';
+  if (r.sdComment) msg += '<b>KOMMENTAR FRA SELGER</b>\n   ' + r.sdComment.substring(0,300) + '\n\n';
+  msg += '<b>ERP</b>\n';
+  const hasHeft = r.heftelser && r.heftelser.includes('registrert');
+  if (r.finnListing)            msg += '   Ikke skrevet - bil annonsert pa Finn\n';
+  else if (hasHeft)             msg += '   Ikke skrevet - heftelser registrert\n';
+  else if (qa && !qa.approved) { msg += '   Ikke skrevet - manuell gjennomgang\n   QA: ' + qa.reason + '\n'; }
+  else { msg += '   Skrevet til ERP\n'; if (qa) msg += '   QA: ' + qa.reason + '\n'; }
   return msg;
 }
 
