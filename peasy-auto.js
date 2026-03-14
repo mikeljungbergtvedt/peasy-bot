@@ -1,4 +1,5 @@
 require('dotenv').config();
+    firstReg: k?.forstegangsregistrering?.registrertForstegangNorgeDato || null,
 const { chromium } = require('playwright');
 const fs = require('fs');
 
@@ -254,20 +255,23 @@ async function searchFinnComps(car, specs, page) {
   const kwTo = specs.kw > 0 ? '&engine_effect_to=' + Math.ceil(specs.kw * 1.3) : '';
   const url = (yFrom, yTo, filters) => base + '&year_from=' + yFrom + '&year_to=' + yTo + filters + '&q=' + q;
   let comps;
-  comps = await scrapeFinn(url(year, year, fuel + trans + drive + kmFrom + kmTo + kwTo), km, page);
-  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(year, year, fuel + trans + drive + kmFrom + kmTo + kwTo) };
-  comps = await scrapeFinn(url(year, year, fuel + trans + drive), km, page);
-  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(year, year, fuel + trans + drive) };
-  comps = await scrapeFinn(url(year, year, fuel + trans), km, page);
-  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(year, year, fuel + trans) };
-  comps = await scrapeFinn(url(year, year, fuel), km, page);
-  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(year, year, fuel) };
-  comps = await scrapeFinn(url(year - 1, year + 1, fuel + trans), km, page);
-  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(year - 1, year + 1, fuel + trans) };
-  comps = await scrapeFinn(url(year - 1, year + 1, fuel), km, page);
-  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(year - 1, year + 1, fuel) };
-  comps = await scrapeFinn(url(year - 2, year + 2, ''), km, page);
-  return { comps: comps.slice(0, 10), finnUrl: url(year - 2, year + 2, '') };
+  const frd = specs.firstReg ? new Date(specs.firstReg) : null;
+  const yF = frd ? frd.getFullYear() : year;
+  const yT = frd && (frd.getMonth()+1) >= 9 ? yF+1 : yF;
+  comps = await scrapeFinn(url(yF, yT, fuel + trans + drive + kmFrom + kmTo + kwTo), km, page);
+  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(yF, yT, fuel + trans + drive + kmFrom + kmTo + kwTo) };
+  comps = await scrapeFinn(url(yF, yT, fuel + trans + drive), km, page);
+  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(yF, yT, fuel + trans + drive) };
+  comps = await scrapeFinn(url(yF, yT, fuel + trans), km, page);
+  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(yF, yT, fuel + trans) };
+  comps = await scrapeFinn(url(yF, yT, fuel), km, page);
+  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(yF, yT, fuel) };
+  comps = await scrapeFinn(url(yF-1, yT+1, fuel + trans), km, page);
+  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(yF-1, yT+1, fuel + trans) };
+  comps = await scrapeFinn(url(yF-1, yT+1, fuel), km, page);
+  if (comps.length >= 5) return { comps: comps.slice(0, 10), finnUrl: url(yF-1, yT+1, fuel) };
+  comps = await scrapeFinn(url(yF-2, yT+2, ''), km, page);
+  return { comps: comps.slice(0, 10), finnUrl: url(yF-2, yT+2, '') };
 }
 
 async function aiFilterComps(car, specs, comps) {
@@ -293,12 +297,16 @@ async function aiFilterComps(car, specs, comps) {
   } catch(e) { return comps; }
 }
 
-function calcValuation(finnAvg) {
-  const mid = finnAvg * (1 - 0.12) * (1 + 0.03);
+function calcValuation(anchor) {
+  const bud = Math.max(Math.round(anchor * 0.88), anchor - 10000);
+  const fee = bud >= 125000 ? 9900 : bud >= 75000 ? 7900 : 5900;
+  const dMid = bud - fee;
   return {
-    low: formatNOK(mid * (1 - 0.05)),
-    high: formatNOK(mid * (1 + 0.05)),
-    likelyBid: formatNOK(mid * (1 - 0.05) * (1 - 0.033)),
+    low: formatNOK(Math.round(dMid * 0.95)),
+    high: formatNOK(Math.round(dMid * 1.05)),
+    dMid: formatNOK(dMid),
+    fee: fee,
+    bud: bud,
   };
 }
 
@@ -316,7 +324,10 @@ function formatResults(results, runTime) {
       msg += (i + 1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + 'km' + flag + '\n';
     });
     msg += '<b>Snitt: ' + fmtNOKstr(finnAvg) + '</b>\n\n';
-    msg += 'Fra: ' + valuation.low.toLocaleString('nb-NO') + ' — Til: ' + valuation.high.toLocaleString('nb-NO') + ' kr\n';
+    msg += 'Anker x0.88: ' + valuation.bud.toLocaleString('nb-NO') + ' kr\n';
+    msg += 'Peasy fee:  - ' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
+    msg += 'D mid:        ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
+    msg += 'D lav: ' + valuation.low.toLocaleString('nb-NO') + ' - D hoy: ' + valuation.high.toLocaleString('nb-NO') + ' kr\n';
     if (r.finnListing) msg += '⚠️ Finn-annonse: ' + r.finnListing.price.toLocaleString('nb-NO') + ' kr (' + r.finnListing.km.toLocaleString('nb-NO') + ' km) — Sendt til manuell gjennomgang\n';
     else msg += 'Finn-annonse: ❌ Ikke funnet\n';
     msg += 'Heftelser: ' + r.heftelser + '\n';
