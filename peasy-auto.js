@@ -344,19 +344,50 @@ async function searchFinnComps(car, specs, page) {
 // Claude picks the best anchor comp from raw Finn listings
 async function aiPickAnchor(car, specs, comps) {
   if (comps.length === 0) return null;
+
+  // Pre-filter to cars within km band — Claude only sees comparable cars
+  // ±30k first, widen to ±50k, then ±80k if needed
   let pool = [];
   for (const band of [30000, 50000, 80000, 150000]) {
     pool = comps.filter(c => Math.abs(c.km - car.km) <= band);
     if (pool.length >= 3) break;
   }
-  if (pool.length === 0) pool = comps;
+  if (pool.length === 0) pool = comps; // last resort
+
+  // Sort by price ASC within pool — Claude picks cheapest comparable
   pool.sort((a, b) => a.price - b.price);
-  const anchor = pool[0];
-  console.log('  Anchor: ' + anchor.price.toLocaleString('nb-NO') + ' kr | ' + anchor.km.toLocaleString('nb-NO') + ' km | ' + anchor.year);
-  return { anchor, pool: pool.slice(0, 15) };
+  const top15 = pool.slice(0, 15);
+
+  const listings = top15.map(function(c, i) {
+    return (i+1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + ' km | ' + c.year + ' | ' + (c.text ? c.text.substring(0, 80) : '');
+  }).join('\n');
+
+  const prompt = 'Du er en bruktbilekspert i Norge for Peasy (C2B auksjon).\n\n'
+    + 'Bilen som skal prises: ' + car.year + ' ' + car.make + ' ' + car.model + ', ' + car.km.toLocaleString('nb-NO') + ' km, ' + specs.fuel + ', ' + Math.round((specs.kw||0)*1.36) + ' hk\n\n'
+    + 'Sammenlignbare biler på Finn (lignende km, sortert billigst først):\n'
+    + listings + '\n\n'
+    + 'Velg den billigste bilen som er et reelt alternativ til vår bil. Ignorer åpenbart feil data.\n'
+    + 'Svar KUN med JSON: {"index": N, "price": PRIS, "reason": "en setning på norsk"}';
+
+  try {
+    const res  = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 150, messages: [{ role: 'user', content: prompt }] })
+    });
+    const data = await res.json();
+    const text = data.content && data.content[0] ? data.content[0].text : '';
+    const json = JSON.parse(text.replace(/```json|```/g, '').trim());
+    const anchor = top15[json.index - 1];
+    if (!anchor) return null;
+    console.log('  AI anchor: #' + json.index + ' — ' + json.price.toLocaleString('nb-NO') + ' kr | ' + json.reason);
+    return { anchor: Object.assign({}, anchor, { aiReason: json.reason }), pool: top15 };
+  } catch(e) {
+    console.error('  AI anchor failed:', e.message);
+    const fallback = pool.slice().sort(function(a, b) { return a.price - b.price; })[0] || comps[0];
+    return { anchor: fallback, pool: pool };
+  }
 }
-
-
 // ─── VALUATION ───────────────────────────────────────────────────────────────
 // xPct = acceptance buffer — update as auction data accumulates
 const BRACKETS = [
@@ -401,9 +432,8 @@ function formatSingleResult(r) {
     const isAnker = r.anchor && comp.price === r.anchor.price && comp.km === r.anchor.km;
     msg += (isAnker ? '> ' : '  ') + (i+1) + '.  ' + comp.price.toLocaleString('nb-NO') + ' kr  ' + comp.km.toLocaleString('nb-NO') + ' km  ' + (comp.year||'') + (isAnker ? '  <- anker' : '') + '\n';
   });
-  const top5 = comps.slice().sort((a,b) => a.price - b.price).slice(0,5);
-  const top5avg = Math.round(top5.reduce((s,x) => s + x.price, 0) / top5.length);
-  msg += '   Snitt (top 5): ' + fmtNOKstr(top5avg) + '\n\n';
+  msg += '   Snitt: ' + fmtNOKstr(finnAvg) + '\n\n';
+  if (r.anchor && r.anchor.aiReason) msg += '<b>AI KOMMENTAR</b>\n' + r.anchor.aiReason + '\n\n';
   msg += '<b>KALKYLE</b>\n';
   msg += '   Anker:          ' + r.lowestComp.toLocaleString('nb-NO') + ' kr\n';
   msg += '   x 0.88:         ' + valuation.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
