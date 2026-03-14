@@ -6,7 +6,7 @@ const fs = require('fs');
 const LOCK = '/tmp/peasy.lock';
 try {
   const old = fs.existsSync(LOCK) && parseInt(fs.readFileSync(LOCK,'utf8'));
-  if (old && old !== process.pid) { try { process.kill(old, 'SIGTERM'); } catch(e){} }
+  if (old && old !== process.pid) { try { process.kill(old, 'SIGKILL'); } catch(e){} }
 } catch(e){}
 fs.writeFileSync(LOCK, String(process.pid));
 process.on('exit', () => { try { fs.unlinkSync(LOCK); } catch(e){} });
