@@ -406,7 +406,7 @@ function calcValuation(lowestComp) {
   const dMid = bud - fee;
   const dLow = formatNOK(dMid * 0.95);
   const dHigh= formatNOK(dMid * 1.05);
-  return { dLow, dHigh, dMid, fee, sannsynligBud: bud };
+  return { dLow, dHigh, dMid, fee, sannsynligBud: bud, tEstimate: bud, sellerT: formatNOK(dMid) };
 }
 
 function formatSingleResult(r) {
