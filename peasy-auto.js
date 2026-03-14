@@ -2,6 +2,16 @@ require('dotenv').config();
 const { chromium } = require('playwright');
 const fs = require('fs');
 
+// Single instance — kill previous if running
+const LOCK = '/tmp/peasy.lock';
+try {
+  const old = fs.existsSync(LOCK) && parseInt(fs.readFileSync(LOCK,'utf8'));
+  if (old && old !== process.pid) { try { process.kill(old, 'SIGTERM'); } catch(e){} }
+} catch(e){}
+fs.writeFileSync(LOCK, String(process.pid));
+process.on('exit', () => { try { fs.unlinkSync(LOCK); } catch(e){} });
+
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const VEGVESEN_API_KEY = process.env.VEGVESEN_API_KEY;
