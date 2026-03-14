@@ -306,7 +306,7 @@ function calcValuation(anchor) {
     high: formatNOK(Math.round(dMid * 1.05)),
     dMid: formatNOK(dMid),
     fee: fee,
-    bud: bud,
+    bud: bud
   };
 }
 
