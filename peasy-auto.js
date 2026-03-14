@@ -2,6 +2,18 @@ require('dotenv').config();
 const { chromium } = require('playwright');
 const fs = require('fs');
 
+// Single instance check
+const fs_pid = require('fs');
+const PID_FILE = '/tmp/peasy-auto.pid';
+if (fs_pid.existsSync(PID_FILE)) {
+  const oldPid = parseInt(fs_pid.readFileSync(PID_FILE,'utf8').trim());
+  try { process.kill(oldPid, 0); process.exit(0); } catch(e) {}
+}
+fs_pid.writeFileSync(PID_FILE, String(process.pid));
+process.on('exit', () => { try { fs_pid.unlinkSync(PID_FILE); } catch(e) {} });
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const VEGVESEN_API_KEY = process.env.VEGVESEN_API_KEY;
