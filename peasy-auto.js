@@ -2,19 +2,10 @@ require('dotenv').config();
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-// Single instance — kill previous if running
-const LOCK = '/tmp/peasy.lock';
-try {
-  const old = fs.existsSync(LOCK) && parseInt(fs.readFileSync(LOCK,'utf8'));
-  if (old && old !== process.pid) { try { process.kill(old, 'SIGKILL'); } catch(e){} }
-} catch(e){}
-fs.writeFileSync(LOCK, String(process.pid));
-process.on('exit', () => { try { fs.unlinkSync(LOCK); } catch(e){} });
-
-
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const VEGVESEN_API_KEY = process.env.VEGVESEN_API_KEY;
+const PROCESSED_FILE = 'processed-cars.json';
 const TESLA_CACHE_FILE = 'tesla-prices.json';
 
 const PAINT_NO = {
@@ -350,23 +341,53 @@ async function searchFinnComps(car, specs, page) {
   return { comps: comps, finnUrl: finnUrl, totalCount: totalCount };
 }
 
-// Anchor = cheapest comp in closest km band
+// Claude picks the best anchor comp from raw Finn listings
 async function aiPickAnchor(car, specs, comps) {
-  if (!comps || comps.length === 0) return null;
+  if (comps.length === 0) return null;
+
+  // Pre-filter to cars within km band — Claude only sees comparable cars
+  // ±30k first, widen to ±50k, then ±80k if needed
   let pool = [];
   for (const band of [30000, 50000, 80000, 150000]) {
     pool = comps.filter(c => Math.abs(c.km - car.km) <= band);
     if (pool.length >= 3) break;
   }
-  if (pool.length === 0) pool = comps;
+  if (pool.length === 0) pool = comps; // last resort
+
+  // Sort by price ASC within pool — Claude picks cheapest comparable
   pool.sort((a, b) => a.price - b.price);
-  const top5 = pool.slice(0, 5);
-  const anchor = top5[0];
-  console.log('  Anchor: ' + anchor.price.toLocaleString('nb-NO') + ' kr | ' + anchor.km.toLocaleString('nb-NO') + ' km');
-  return { anchor, pool: top5 };
+  const top15 = pool.slice(0, 15);
+
+  const listings = top15.map(function(c, i) {
+    return (i+1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + ' km | ' + c.year + ' | ' + (c.text ? c.text.substring(0, 80) : '');
+  }).join('\n');
+
+  const prompt = 'Du er en bruktbilekspert i Norge for Peasy (C2B auksjon).\n\n'
+    + 'Bilen som skal prises: ' + car.year + ' ' + car.make + ' ' + car.model + ', ' + car.km.toLocaleString('nb-NO') + ' km, ' + specs.fuel + ', ' + Math.round((specs.kw||0)*1.36) + ' hk\n\n'
+    + 'Sammenlignbare biler på Finn (lignende km, sortert billigst først):\n'
+    + listings + '\n\n'
+    + 'Velg den billigste bilen som er et reelt alternativ til vår bil. Ignorer åpenbart feil data.\n'
+    + 'Svar KUN med JSON: {"index": N, "price": PRIS, "reason": "en setning på norsk"}';
+
+  try {
+    const res  = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 150, messages: [{ role: 'user', content: prompt }] })
+    });
+    const data = await res.json();
+    const text = data.content && data.content[0] ? data.content[0].text : '';
+    const json = JSON.parse(text.replace(/```json|```/g, '').trim());
+    const anchor = top15[json.index - 1];
+    if (!anchor) return null;
+    console.log('  AI anchor: #' + json.index + ' — ' + json.price.toLocaleString('nb-NO') + ' kr | ' + json.reason);
+    return { anchor: Object.assign({}, anchor, { aiReason: json.reason }), pool: top15 };
+  } catch(e) {
+    console.error('  AI anchor failed:', e.message);
+    const fallback = pool.slice().sort(function(a, b) { return a.price - b.price; })[0] || comps[0];
+    return { anchor: fallback, pool: pool };
+  }
 }
-
-
 // ─── VALUATION ───────────────────────────────────────────────────────────────
 // xPct = acceptance buffer — update as auction data accumulates
 const BRACKETS = [
@@ -379,17 +400,13 @@ const BRACKETS = [
 function getBracket(price) { return BRACKETS.find(b => price <= b.max); }
 
 function calcValuation(lowestComp) {
-  if (!lowestComp || lowestComp <= 0 || !isFinite(lowestComp)) return { dLow:0, dHigh:0, dMid:0, fee:0, sannsynligBud:0, tEstimate:0, sellerT:0, eBud:0, xPct:0 };
   const raw  = formatNOK(lowestComp * 0.88);
   const bud  = (lowestComp - raw) >= 10000 ? raw : lowestComp - 10000;
   const fee  = bud >= 125000 ? 9900 : bud >= 75000 ? 7900 : 5900;
   const dMid = bud - fee;
   const dLow = formatNOK(dMid * 0.95);
   const dHigh= formatNOK(dMid * 1.05);
-  // PDEC1: Estimert høyeste bud (E) — dynamic per bracket (Anbefalt X%)
-  const xPct = dMid <= 100000 ? 0.102 : dMid <= 250000 ? -0.089 : dMid <= 400000 ? -0.046 : -0.073;
-  const eBud = formatNOK(dLow * (1 + xPct));
-  return { dLow, dHigh, dMid, fee, sannsynligBud: bud, tEstimate: bud, sellerT: formatNOK(dMid), eBud, xPct };
+  return { dLow, dHigh, dMid, fee, sannsynligBud: bud, tEstimate: bud, sellerT: formatNOK(dMid) };
 }
 
 function formatSingleResult(r) {
@@ -404,7 +421,7 @@ function formatSingleResult(r) {
   msg += r.regNr + '  |  ' + car.make + ' ' + car.model + ' ' + car.year + '  |  ' + car.km.toLocaleString('nb-NO') + ' km  |  ' + specs.fuel + '  |  ' + specs.gearbox + '  |  ' + specs.drive + '  |  ' + hkStr + '\n\n';
   msg += '<b>FINN-SOK</b>  ' + specs.fuel + '  |  ' + car.year + '  |  ' + (r.totalCount || comps.length) + ' treff  |  <a href="' + finnUrl + '">Apne sok</a>\n';
   if (r.finnListing) {
-    const gap = r.finnListing.price - r.anchor.price;
+    const gap = r.finnListing.price - r.lowestComp;
     const gapStr = gap >= 0 ? '+' + Math.round(gap/1000) + 'k over anker' : Math.abs(Math.round(gap/1000)) + 'k under anker';
     msg += '   Eigen annonse: <a href="https://www.finn.no/mobility/search/car?q=' + car.regNr + '">' + r.finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ')</a>\n';
   } else {
@@ -416,13 +433,13 @@ function formatSingleResult(r) {
     msg += (isAnker ? '> ' : '  ') + (i+1) + '.  ' + comp.price.toLocaleString('nb-NO') + ' kr  ' + comp.km.toLocaleString('nb-NO') + ' km  ' + (comp.year||'') + (isAnker ? '  <- anker' : '') + '\n';
   });
   msg += '   Snitt: ' + fmtNOKstr(finnAvg) + '\n\n';
+  if (r.anchor && r.anchor.aiReason) msg += '<b>AI KOMMENTAR</b>\n' + r.anchor.aiReason + '\n\n';
   msg += '<b>KALKYLE</b>\n';
-  msg += '   Anker:          ' + r.anchor.price.toLocaleString('nb-NO') + ' kr\n';
+  msg += '   Anker:          ' + r.lowestComp.toLocaleString('nb-NO') + ' kr\n';
   msg += '   x 0.88:         ' + valuation.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
   msg += '   Peasy fee (U): -' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
   msg += '   D mid:          ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
-  msg += '<b>   Estimert:      ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n';
-  msg += '   Est. bud (E):  ~' + valuation.eBud.toLocaleString('nb-NO') + ' kr  (' + (valuation.xPct >= 0 ? '+' : '') + (valuation.xPct * 100).toFixed(1) + '%)\n\n';
+  msg += '<b>   Estimert:      ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
   msg += '<b>HEFTELSER</b>\n   ' + r.heftelser + '\n';
   if (valuation.dMid < 10000) msg += '   NB: Lav okonomi - vurder manuelt\n';
   msg += '\n';
@@ -436,6 +453,11 @@ function formatSingleResult(r) {
   return msg;
 }
 
+function markProcessed(regNr, result) {
+  const p = loadJSON(PROCESSED_FILE);
+  p[regNr] = { timestamp: new Date().toISOString(), ...result };
+  saveJSON(PROCESSED_FILE, p);
+}
 
 async function run(force) {
   const runTime = new Date();
@@ -478,6 +500,7 @@ async function run(force) {
         if (car.erpId && !finnListing && !hasHeftelser && qa.approved) {
           const erpToken = await getERPToken();
           await writeARValueToERP(car.erpId, valuation.dLow, valuation.dHigh, heftelser, erpToken);
+          markProcessed(car.regNr, { make: car.make, model: car.model, year: car.year, finnAvg, lowestComp, dLow: valuation.dLow, dHigh: valuation.dHigh });
         } else if (finnListing) {
           console.log('  SKIP ERP: Car listed on Finn at ' + finnListing.price + ' kr');
         } else if (hasHeftelser) {
@@ -548,12 +571,15 @@ async function pollTelegramCommands() {
           if (pendingCars.length === 0) {
             await sendTelegram('Ingen biler i koen.');
           } else {
+            const processed = loadJSON(PROCESSED_FILE);
             pendingCars.forEach(c => delete processed[c.regNr]);
+            saveJSON(PROCESSED_FILE, processed);
             await sendTelegram('Kjorer om igjen ' + pendingCars.length + ' bil(er)...');
             run(true);
           }
         }
         if (text === '/status') {
+          const processed = loadJSON(PROCESSED_FILE);
           await sendTelegram('Bot kjorer | ' + Object.keys(processed).length + ' biler behandlet');
         }
         if (text && text.startsWith('/finn ')) {
@@ -616,7 +642,7 @@ async function pollTelegramCommands() {
               const carYear = erpCar?.year || 0;
               const top5 = comps.slice().sort((a,b) => a.price - b.price).slice(0, 5);
               const avg  = Math.round(comps.reduce((s, c) => s + c.price, 0) / comps.length);
-              const lowest = (anchor && anchor.anchor) ? anchor.anchor.price : (anchor && anchor.price) ? anchor.price : Math.min(...comps.filter(c=>c.price>0).map(c => c.price));
+              const lowest = anchor ? anchor.price : Math.min(...comps.map(c => c.price));
               const val  = calcValuation(lowest);
               const hk = Math.round((carInfo?.kw || 0) * 1.36);
               let reply = '━━━━━━━━━━━━━━━━━━━━\n';
@@ -635,12 +661,11 @@ async function pollTelegramCommands() {
               if (anchor && anchor.aiReason) reply += '🤖 ' + anchor.aiReason + '\n';
               reply += '━━━━━━━━━━━━━━━━━━━━\n\n';
               reply += '💰 <b>KALKYLE</b>\n';
-              reply += '   Anker:          ' + lowest.toLocaleString('nb-NO') + ' kr\n';
-              reply += '   x 0.88:         ' + val.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
-              reply += '   Peasy fee (U): -' + val.fee.toLocaleString('nb-NO') + ' kr\n';
-              reply += '   D mid:          ' + val.dMid.toLocaleString('nb-NO') + ' kr\n';
-              reply += '<b>   Estimert:      ' + val.dLow.toLocaleString('nb-NO') + ' - ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n';
-              reply += '   Est. bud (E):  ~' + val.eBud.toLocaleString('nb-NO') + ' kr  (' + (val.xPct >= 0 ? '+' : '') + (val.xPct * 100).toFixed(1) + '%)\n\n';
+              reply += 'Finn anker:       <b>' + lowest.toLocaleString('nb-NO') + ' kr</b>\n';
+              reply += '× 0.88 (T est):  ' + val.tEstimate.toLocaleString('nb-NO') + ' kr\n';
+              reply += 'Peasy fee:        ' + val.fee.toLocaleString('nb-NO') + ' kr\n';
+              reply += 'Selger T:         ' + val.sellerT.toLocaleString('nb-NO') + ' kr\n';
+              reply += '<b>D lav: ' + val.dLow.toLocaleString('nb-NO') + ' — D høy: ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
               if (finnListing) reply += 'Finn-annonse: ✅ <a href="https://www.finn.no/mobility/search/car?q=' + regNr + '">' + finnListing.price.toLocaleString('nb-NO') + ' kr (' + finnListing.km.toLocaleString('nb-NO') + ' km)</a>\n';
 
               else reply += 'Finn-annonse: ❌ Ikke funnet\n';
