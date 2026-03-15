@@ -15,7 +15,6 @@ process.on('exit', () => { try { fs.unlinkSync(LOCK); } catch(e){} });
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const VEGVESEN_API_KEY = process.env.VEGVESEN_API_KEY;
-const PROCESSED_FILE = 'processed-cars.json';
 const TESLA_CACHE_FILE = 'tesla-prices.json';
 
 const PAINT_NO = {
@@ -463,11 +462,6 @@ function formatSingleResult(r) {
   return msg;
 }
 
-function markProcessed(regNr, result) {
-  const p = loadJSON(PROCESSED_FILE);
-  p[regNr] = { timestamp: new Date().toISOString(), ...result };
-  saveJSON(PROCESSED_FILE, p);
-}
 
 async function run(force) {
   const runTime = new Date();
@@ -510,7 +504,6 @@ async function run(force) {
         if (car.erpId && !finnListing && !hasHeftelser && qa.approved) {
           const erpToken = await getERPToken();
           await writeARValueToERP(car.erpId, valuation.dLow, valuation.dHigh, heftelser, erpToken);
-          markProcessed(car.regNr, { make: car.make, model: car.model, year: car.year, finnAvg, lowestComp, dLow: valuation.dLow, dHigh: valuation.dHigh });
         } else if (finnListing) {
           console.log('  SKIP ERP: Car listed on Finn at ' + finnListing.price + ' kr');
         } else if (hasHeftelser) {
@@ -581,15 +574,12 @@ async function pollTelegramCommands() {
           if (pendingCars.length === 0) {
             await sendTelegram('Ingen biler i koen.');
           } else {
-            const processed = loadJSON(PROCESSED_FILE);
             pendingCars.forEach(c => delete processed[c.regNr]);
-            saveJSON(PROCESSED_FILE, processed);
             await sendTelegram('Kjorer om igjen ' + pendingCars.length + ' bil(er)...');
             run(true);
           }
         }
         if (text === '/status') {
-          const processed = loadJSON(PROCESSED_FILE);
           await sendTelegram('Bot kjorer | ' + Object.keys(processed).length + ' biler behandlet');
         }
         if (text && text.startsWith('/finn ')) {
