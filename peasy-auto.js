@@ -409,6 +409,7 @@ const BRACKETS = [
 function getBracket(price) { return BRACKETS.find(b => price <= b.max); }
 
 function calcValuation(lowestComp) {
+  if (!lowestComp || lowestComp <= 0 || !isFinite(lowestComp)) return { dLow:0, dHigh:0, dMid:0, fee:0, sannsynligBud:0, tEstimate:0, sellerT:0, eBud:0, xPct:0 };
   const raw  = formatNOK(lowestComp * 0.88);
   const bud  = (lowestComp - raw) >= 10000 ? raw : lowestComp - 10000;
   const fee  = bud >= 125000 ? 9900 : bud >= 75000 ? 7900 : 5900;
@@ -646,7 +647,7 @@ async function pollTelegramCommands() {
               const carYear = erpCar?.year || 0;
               const top5 = comps.slice().sort((a,b) => a.price - b.price).slice(0, 5);
               const avg  = Math.round(comps.reduce((s, c) => s + c.price, 0) / comps.length);
-              const lowest = anchor ? anchor.price : Math.min(...comps.map(c => c.price));
+              const lowest = (anchor && anchor.anchor) ? anchor.anchor.price : (anchor && anchor.price) ? anchor.price : Math.min(...comps.filter(c=>c.price>0).map(c => c.price));
               const val  = calcValuation(lowest);
               const hk = Math.round((carInfo?.kw || 0) * 1.36);
               let reply = '━━━━━━━━━━━━━━━━━━━━\n';
