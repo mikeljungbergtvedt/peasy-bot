@@ -415,7 +415,10 @@ function calcValuation(lowestComp) {
   const dMid = bud - fee;
   const dLow = formatNOK(dMid * 0.95);
   const dHigh= formatNOK(dMid * 1.05);
-  return { dLow, dHigh, dMid, fee, sannsynligBud: bud, tEstimate: bud, sellerT: formatNOK(dMid) };
+  // PDEC1: Estimert høyeste bud (E) — dynamic per bracket (Anbefalt X%)
+  const xPct = dMid <= 100000 ? 0.102 : dMid <= 250000 ? -0.089 : dMid <= 400000 ? -0.046 : -0.073;
+  const eBud = formatNOK(dLow * (1 + xPct));
+  return { dLow, dHigh, dMid, fee, sannsynligBud: bud, tEstimate: bud, sellerT: formatNOK(dMid), eBud, xPct };
 }
 
 function formatSingleResult(r) {
@@ -448,7 +451,8 @@ function formatSingleResult(r) {
   msg += '   x 0.88:         ' + valuation.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
   msg += '   Peasy fee (U): -' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
   msg += '   D mid:          ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
-  msg += '<b>   Estimert:      ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
+  msg += '<b>   Estimert:      ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n';
+  msg += '   Est. bud (E):  ~' + valuation.eBud.toLocaleString('nb-NO') + ' kr  (' + (valuation.xPct >= 0 ? '+' : '') + (valuation.xPct * 100).toFixed(1) + '%)\n\n';
   msg += '<b>HEFTELSER</b>\n   ' + r.heftelser + '\n';
   if (valuation.dMid < 10000) msg += '   NB: Lav okonomi - vurder manuelt\n';
   msg += '\n';
@@ -665,7 +669,8 @@ async function pollTelegramCommands() {
               reply += '   x 0.88:         ' + val.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
               reply += '   Peasy fee (U): -' + val.fee.toLocaleString('nb-NO') + ' kr\n';
               reply += '   D mid:          ' + val.dMid.toLocaleString('nb-NO') + ' kr\n';
-              reply += '<b>   Estimert:      ' + val.dLow.toLocaleString('nb-NO') + ' - ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
+              reply += '<b>   Estimert:      ' + val.dLow.toLocaleString('nb-NO') + ' - ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n';
+              reply += '   Est. bud (E):  ~' + val.eBud.toLocaleString('nb-NO') + ' kr  (' + (val.xPct >= 0 ? '+' : '') + (val.xPct * 100).toFixed(1) + '%)\n\n';
               if (finnListing) reply += 'Finn-annonse: ✅ <a href="https://www.finn.no/mobility/search/car?q=' + regNr + '">' + finnListing.price.toLocaleString('nb-NO') + ' kr (' + finnListing.km.toLocaleString('nb-NO') + ' km)</a>\n';
 
               else reply += 'Finn-annonse: ❌ Ikke funnet\n';
