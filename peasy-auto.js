@@ -661,11 +661,11 @@ async function pollTelegramCommands() {
               if (anchor && anchor.aiReason) reply += '🤖 ' + anchor.aiReason + '\n';
               reply += '━━━━━━━━━━━━━━━━━━━━\n\n';
               reply += '💰 <b>KALKYLE</b>\n';
-              reply += 'Finn anker:       <b>' + lowest.toLocaleString('nb-NO') + ' kr</b>\n';
-              reply += '× 0.88 (T est):  ' + val.tEstimate.toLocaleString('nb-NO') + ' kr\n';
-              reply += 'Peasy fee:        ' + val.fee.toLocaleString('nb-NO') + ' kr\n';
-              reply += 'Selger T:         ' + val.sellerT.toLocaleString('nb-NO') + ' kr\n';
-              reply += '<b>D lav: ' + val.dLow.toLocaleString('nb-NO') + ' — D høy: ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
+              reply += '   Anker:          ' + lowest.toLocaleString('nb-NO') + ' kr\n';
+              reply += '   x 0.88:         ' + val.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
+              reply += '   Peasy fee (U): -' + val.fee.toLocaleString('nb-NO') + ' kr\n';
+              reply += '   D mid:          ' + val.dMid.toLocaleString('nb-NO') + ' kr\n';
+              reply += '<b>   Estimert:      ' + val.dLow.toLocaleString('nb-NO') + ' - ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
               if (finnListing) reply += 'Finn-annonse: ✅ <a href="https://www.finn.no/mobility/search/car?q=' + regNr + '">' + finnListing.price.toLocaleString('nb-NO') + ' kr (' + finnListing.km.toLocaleString('nb-NO') + ' km)</a>\n';
 
               else reply += 'Finn-annonse: ❌ Ikke funnet\n';
