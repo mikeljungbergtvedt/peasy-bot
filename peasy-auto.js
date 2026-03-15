@@ -404,7 +404,7 @@ function formatSingleResult(r) {
   msg += r.regNr + '  |  ' + car.make + ' ' + car.model + ' ' + car.year + '  |  ' + car.km.toLocaleString('nb-NO') + ' km  |  ' + specs.fuel + '  |  ' + specs.gearbox + '  |  ' + specs.drive + '  |  ' + hkStr + '\n\n';
   msg += '<b>FINN-SOK</b>  ' + specs.fuel + '  |  ' + car.year + '  |  ' + (r.totalCount || comps.length) + ' treff  |  <a href="' + finnUrl + '">Apne sok</a>\n';
   if (r.finnListing) {
-    const gap = r.finnListing.price - r.lowestComp;
+    const gap = r.finnListing.price - r.anchor.price;
     const gapStr = gap >= 0 ? '+' + Math.round(gap/1000) + 'k over anker' : Math.abs(Math.round(gap/1000)) + 'k under anker';
     msg += '   Eigen annonse: <a href="https://www.finn.no/mobility/search/car?q=' + car.regNr + '">' + r.finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ')</a>\n';
   } else {
@@ -416,9 +416,8 @@ function formatSingleResult(r) {
     msg += (isAnker ? '> ' : '  ') + (i+1) + '.  ' + comp.price.toLocaleString('nb-NO') + ' kr  ' + comp.km.toLocaleString('nb-NO') + ' km  ' + (comp.year||'') + (isAnker ? '  <- anker' : '') + '\n';
   });
   msg += '   Snitt: ' + fmtNOKstr(finnAvg) + '\n\n';
-  if (r.anchor && r.anchor.aiReason) msg += '<b>AI KOMMENTAR</b>\n' + r.anchor.aiReason + '\n\n';
   msg += '<b>KALKYLE</b>\n';
-  msg += '   Anker:          ' + r.lowestComp.toLocaleString('nb-NO') + ' kr\n';
+  msg += '   Anker:          ' + r.anchor.price.toLocaleString('nb-NO') + ' kr\n';
   msg += '   x 0.88:         ' + valuation.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
   msg += '   Peasy fee (U): -' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
   msg += '   D mid:          ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
