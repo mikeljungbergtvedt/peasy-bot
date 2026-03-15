@@ -366,9 +366,9 @@ async function aiPickAnchor(car, specs, comps) {
 
   // Sort by price ASC within pool — Claude picks cheapest comparable
   pool.sort((a, b) => a.price - b.price);
-  const top15 = pool.slice(0, 15);
+  const top5 = pool.slice(0, 5);
 
-  const listings = top15.map(function(c, i) {
+  const listings = top5.map(function(c, i) {
     return (i+1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + ' km | ' + c.year + ' | ' + (c.text ? c.text.substring(0, 80) : '');
   }).join('\n');
 
@@ -388,14 +388,14 @@ async function aiPickAnchor(car, specs, comps) {
     const data = await res.json();
     const text = data.content && data.content[0] ? data.content[0].text : '';
     const json = JSON.parse(text.replace(/```json|```/g, '').trim());
-    const anchor = top15[json.index - 1];
+    const anchor = top5[json.index - 1];
     if (!anchor) return null;
     console.log('  AI anchor: #' + json.index + ' — ' + json.price.toLocaleString('nb-NO') + ' kr | ' + json.reason);
-    return { anchor: Object.assign({}, anchor, { aiReason: json.reason }), pool: top15 };
+    return { anchor: Object.assign({}, anchor, { aiReason: json.reason }), pool: top5 };
   } catch(e) {
     console.error('  AI anchor failed:', e.message);
     const fallback = pool.slice().sort(function(a, b) { return a.price - b.price; })[0] || comps[0];
-    return { anchor: fallback, pool: pool };
+    return { anchor: fallback, pool: top5 };
   }
 }
 // ─── VALUATION ───────────────────────────────────────────────────────────────
