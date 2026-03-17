@@ -10,7 +10,7 @@ const TESLA_CACHE_FILE = 'tesla-prices.json';
 
 const PAINT_NO = {
   'WHITE': 'Perlemorshvit', 'BLACK': 'Enfargert svart', 'SILVER': 'Solv',
-  'BLUE': 'Dypbla metallic', 'RED': 'Rod multi-coat', 'GRAY': 'MiddagsgrÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥',
+  'BLUE': 'Dypbla metallic', 'RED': 'Rod multi-coat', 'GRAY': 'MiddagsgrÃÂ¥',
   'STEALTH_GREY': 'Stealth Grey', 'ULTRA_RED': 'Ultra Red', 'QUICKSILVER': 'Quicksilver',
 };
 
@@ -96,8 +96,8 @@ async function checkTeslaPrices() {
     let msg = 'TESLA MODEL 3 PRISREDUKSJON\n\n';
     for (const a of alerts) {
       msg += 'Model 3 ' + a.trimName + ' | ' + a.color + ' | ' + a.range + ' | ' + a.inTransit + '\n';
-      if (!a.isNew) { msg += 'Senket med ' + fmtNOKstr(a.drop) + ' | FÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸r: ' + fmtNOKstr(a.oldPrice) + '\n'; }
-      msg += 'Pris nÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥: ' + fmtNOKstr(a.finalPrice) + '\n\n';
+      if (!a.isNew) { msg += 'Senket med ' + fmtNOKstr(a.drop) + ' | FÃÂ¸r: ' + fmtNOKstr(a.oldPrice) + '\n'; }
+      msg += 'Pris nÃÂ¥: ' + fmtNOKstr(a.finalPrice) + '\n\n';
     }
     await sendTelegram(msg);
   } else {
@@ -138,8 +138,6 @@ async function writeARValueToERP(erpId, priceMin, priceMax, heftelser, token) {
     const payload = {
       price_final_min: formatNOK(priceMin),
       price_final_max: formatNOK(priceMax),
-      purchase_price_estimate_min: 1,
-      purchase_price_estimate_max: 1,
       encumbrance: { is_checked: true, has_debt: hasDebt, comment: heftelser || 'Ingen heftelser', date: today },
       owners_check_date: today,
       owners_check_comment: null,
@@ -161,57 +159,6 @@ async function writeARValueToERP(erpId, priceMin, priceMax, heftelser, token) {
   } catch(e) { console.error('  ERP write error:', e.message); return false; }
 }
 
-
-
-async function buildSdComment(r) {
-  const { car, specs, comps, finnUrl, valuation, finnAvg, lowestComp, qa, heftelser, finnListing, anchor } = r;
-  const source = (car.source || '').toLowerCase();
-  const title  = source === 'driveno' ? 'DRIVE BIL TIL ESTIMERING' : 'PEASY BIL TIL ESTIMERING';
-  const isEl   = specs.fuel.toLowerCase().includes('elektr');
-  const hkStr  = isEl ? (specs.range ? specs.range + ' km rekkevidde' : specs.kw + ' kW') : Math.round((specs.kw||0)*1.36) + 'hk';
-  let msg = title + '\n';
-  msg += car.regNr + ' | ' + car.make + ' ' + car.model + ' ' + car.year + ' | ' + car.km.toLocaleString('nb-NO') + 'km | ' + specs.fuel + ' | ' + specs.gearbox + ' | ' + specs.drive + ' | ' + hkStr + '\n';
-  msg += '\nFINN-SOK: ' + (r.totalCount || comps.length) + ' treff\n\n';
-  msg += 'FINN KOMPS\n';
-  comps.slice().sort((a,b) => a.price - b.price).slice(0,5).forEach((comp,i) => {
-    const isAnker = anchor && comp.price === anchor.price && comp.km === anchor.km;
-    msg += (isAnker ? '> ' : '  ') + (i+1) + '. ' + comp.price.toLocaleString('nb-NO') + ' kr | ' + comp.km.toLocaleString('nb-NO') + 'km | ' + (comp.year||'') + (isAnker ? ' <- anker' : '') + '\n';
-  });
-  msg += 'Snitt: ' + fmtNOKstr(finnAvg) + '\n';
-  if (anchor && anchor.aiReason) msg += anchor.aiReason + '\n';
-  msg += '\nKALKYLE\n';
-  msg += 'Anker: ' + lowestComp.toLocaleString('nb-NO') + ' kr\n';
-  msg += 'x 0.88: ' + valuation.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
-  msg += 'Peasy fee (U): -' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
-  msg += 'D mid: ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
-  msg += 'Estimert: ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr\n';
-  if (valuation.eBud) msg += 'Est. bud (E): ~' + valuation.eBud.toLocaleString('nb-NO') + ' kr (' + (valuation.xPct >= 0 ? '+' : '') + (valuation.xPct * 100).toFixed(1) + '%)\n';
-  if (finnListing) {
-    const gap = finnListing.price - lowestComp;
-    const gapStr = gap >= 0 ? '+' + Math.round(gap/1000) + 'k over anker' : Math.abs(Math.round(gap/1000)) + 'k under anker';
-    msg += '\nFinn-annonse: ' + finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ')\n';
-  } else { msg += '\nFinn-annonse: Ikke funnet\n'; }
-  msg += 'Heftelser: ' + heftelser + '\n';
-  const hasHeft = heftelser && heftelser.includes('registrert');
-  if (finnListing)           msg += '\nERP: Ikke skrevet - annonsert pa Finn\n';
-  else if (qa && !qa.approved) msg += '\nERP: FLAGGET - ' + qa.reason + '\n';
-  else if (hasHeft)          msg += '\nERP: Skrevet (heftelser - sjekk Finans)\n';
-  else                       msg += '\nERP: Skrevet til ERP\n';
-  return msg;
-}
-async function postERPComment(erpId, text, token) {
-  try {
-    const plain = text.replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').trim();
-    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/' + erpId + '/comments', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comment: plain })
-    });
-    const data = await res.json();
-    if (data.success) console.log('  ERP comment posted');
-    else console.error('  ERP comment failed:', JSON.stringify(data));
-  } catch(e) { console.error('  ERP comment error:', e.message); }
-}
 async function fetchPendingCars() {
   console.log('Fetching pending cars from ERP...');
   const token = await getERPToken();
@@ -267,13 +214,13 @@ async function checkHeftelser(regNr, page) {
     await page.goto('https://rettsstiftelser.brreg.no/nb/oppslag/motorvogn/' + regNr.replace(/\s/g, ''), { waitUntil: 'networkidle', timeout: 15000 });
     await page.waitForTimeout(1500);
     const text = await page.evaluate(() => document.body.innerText);
-    if (text.includes('ingen oppforinger') || text.includes('Ingen oppforinger') || text.includes('ingen oppfÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸ringer') || text.includes('Ingen oppfÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸ringer')) return 'Ingen heftelser';
+    if (text.includes('ingen oppforinger') || text.includes('Ingen oppforinger') || text.includes('ingen oppfÃÂ¸ringer') || text.includes('Ingen oppfÃÂ¸ringer')) return 'Ingen heftelser';
     if (text.includes('heftelse') || text.includes('pant') || text.includes('registrert')) return 'Heftelser registrert - sjekk manuelt';
     return 'Ingen heftelser';
   } catch(e) { return 'Kunne ikke sjekke heftelser'; }
 }
 
-// ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ FINN URL HELPERS ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
+// Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂ FINN URL HELPERS Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
 // body_type: 1=SUV 2=Stasjonsvogn 3=Sedan 4=Coupe 5=Cabriolet 7=Varebil
 // wheel_drive: 1=2WD 2=4WD | fuel: 1=Bensin 2=Diesel 3=Hybrid 4=Elektrisk
 // transmission: 1=Manuell 2=Automat
@@ -348,9 +295,9 @@ async function scrapeFinn(url, targetKm, page) {
 }
 
 function qaCheckComps(car, specs, comps, valuation) {
-  if (comps.length < 2) return { approved: false, reason: 'For fÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥ Finn-treff (' + comps.length + ')' };
+  if (comps.length < 2) return { approved: false, reason: 'For fÃÂ¥ Finn-treff (' + comps.length + ')' };
   if (!valuation || !valuation.dLow) return { approved: false, reason: 'Valuation mangler' };
-  if (valuation.tEstimate < 10000) return { approved: false, reason: 'T-estimat under 10 000 kr ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ vurder manuelt' };
+  if (valuation.tEstimate < 10000) return { approved: false, reason: 'T-estimat under 10 000 kr Ã¢ÂÂ vurder manuelt' };
   return { approved: true, reason: 'OK' };
 }
 
@@ -362,7 +309,7 @@ async function searchFinnComps(car, specs, page) {
   const base     = 'https://www.finn.no/mobility/search/car?sales_form=1&registration_class=' + regClass + '&q=' + encodeURIComponent(q) + '&year_from=' + year + '&year_to=' + year;
 
   // Scrape both km-ascending and km-descending to get cars near our mileage
-  // Then fall back to ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ±1 year if too few results
+  // Then fall back to ÃÂ±1 year if too few results
   const searches = [
     base + '&sort=MILEAGE_ASC',
     base + '&sort=MILEAGE_DESC',
@@ -398,8 +345,8 @@ async function searchFinnComps(car, specs, page) {
 async function aiPickAnchor(car, specs, comps) {
   if (comps.length === 0) return null;
 
-  // Pre-filter to cars within km band ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Claude only sees comparable cars
-  // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ±30k first, widen to ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ±50k, then ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ±80k if needed
+  // Pre-filter to cars within km band Ã¢ÂÂ Claude only sees comparable cars
+  // ÃÂ±30k first, widen to ÃÂ±50k, then ÃÂ±80k if needed
   let pool = [];
   for (const band of [30000, 50000, 80000, 150000]) {
     pool = comps.filter(c => Math.abs(c.km - car.km) <= band);
@@ -407,7 +354,7 @@ async function aiPickAnchor(car, specs, comps) {
   }
   if (pool.length === 0) pool = comps; // last resort
 
-  // Sort by price ASC within pool ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Claude picks cheapest comparable
+  // Sort by price ASC within pool Ã¢ÂÂ Claude picks cheapest comparable
   pool.sort((a, b) => a.price - b.price);
   const top15 = pool.slice(0, 15);
 
@@ -417,10 +364,10 @@ async function aiPickAnchor(car, specs, comps) {
 
   const prompt = 'Du er en bruktbilekspert i Norge for Peasy (C2B auksjon).\n\n'
     + 'Bilen som skal prises: ' + car.year + ' ' + car.make + ' ' + car.model + ', ' + car.km.toLocaleString('nb-NO') + ' km, ' + specs.fuel + ', ' + Math.round((specs.kw||0)*1.36) + ' hk\n\n'
-    + 'Sammenlignbare biler pÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥ Finn (lignende km, sortert billigst fÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸rst):\n'
+    + 'Sammenlignbare biler pÃÂ¥ Finn (lignende km, sortert billigst fÃÂ¸rst):\n'
     + listings + '\n\n'
-    + 'Velg den billigste bilen som er et reelt alternativ til vÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥r bil. Ignorer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥penbart feil data.\n'
-    + 'Svar KUN med JSON: {"index": N, "price": PRIS, "reason": "en setning pÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¥ norsk"}';
+    + 'Velg den billigste bilen som er et reelt alternativ til vÃÂ¥r bil. Ignorer ÃÂ¥penbart feil data.\n'
+    + 'Svar KUN med JSON: {"index": N, "price": PRIS, "reason": "en setning pÃÂ¥ norsk"}';
 
   try {
     const res  = await fetch('https://api.anthropic.com/v1/messages', {
@@ -433,7 +380,7 @@ async function aiPickAnchor(car, specs, comps) {
     const json = JSON.parse(text.replace(/```json|```/g, '').trim());
     const anchor = top15[json.index - 1];
     if (!anchor) return null;
-    console.log('  AI anchor: #' + json.index + ' ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ' + json.price.toLocaleString('nb-NO') + ' kr | ' + json.reason);
+    console.log('  AI anchor: #' + json.index + ' Ã¢ÂÂ ' + json.price.toLocaleString('nb-NO') + ' kr | ' + json.reason);
     return { anchor: Object.assign({}, anchor, { aiReason: json.reason }), pool: top15 };
   } catch(e) {
     console.error('  AI anchor failed:', e.message);
@@ -441,8 +388,8 @@ async function aiPickAnchor(car, specs, comps) {
     return { anchor: fallback, pool: pool };
   }
 }
-// ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ VALUATION ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
-// xPct = acceptance buffer ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ update as auction data accumulates
+// Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂ VALUATION Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ
+// xPct = acceptance buffer Ã¢ÂÂ update as auction data accumulates
 const BRACKETS = [
   { max: 100000,   dealerMarginPct: 0,    minMargin: 10000, xPct: 0.03 },
   { max: 250000,   dealerMarginPct: 0.12, minMargin: 10000, xPct: 0.01 },
@@ -459,56 +406,50 @@ function calcValuation(lowestComp) {
   const dMid = bud - fee;
   const dLow = formatNOK(dMid * 0.95);
   const dHigh= formatNOK(dMid * 1.05);
-  const xPct = dMid <= 100000 ? 0.102 : dMid <= 250000 ? -0.089 : dMid <= 400000 ? -0.046 : -0.073;
-  const eBud = formatNOK(dLow * (1 + xPct));
-  return { dLow, dHigh, dMid, fee, sannsynligBud: bud, tEstimate: bud, sellerT: formatNOK(dMid), eBud, xPct };
+  return { dLow, dHigh, dMid, fee, sannsynligBud: bud, tEstimate: bud, sellerT: formatNOK(dMid) };
 }
 
 function formatSingleResult(r) {
-  if (r.status === 'error') { return '<b>' + r.regNr + '</b> â ' + r.error + '\n\n'; }
+  let msg = '';
+  if (r.status === 'error') { return '<b>' + r.regNr + '</b> Ã¢ÂÂ ' + r.error + '\n\n'; }
   const { car, specs, comps, finnUrl, valuation, finnAvg, lowestComp, qa } = r;
   const source = (car.source || '').toLowerCase();
   const title  = source === 'driveno' ? 'DRIVE BIL TIL ESTIMERING' : 'PEASY BIL TIL ESTIMERING';
   const isEl   = specs.fuel.toLowerCase().includes('elektr');
   const hkStr  = isEl ? (specs.range ? specs.range + ' km rekkevidde' : specs.kw + ' kW') : Math.round((specs.kw||0)*1.36) + 'hk';
-  let msg = '';
   msg += '<b>' + title + '</b>\n';
-  msg += r.regNr + ' | ' + car.make + ' ' + car.model + ' ' + car.year + ' | ' + car.km.toLocaleString('nb-NO') + 'km | ' + specs.fuel + ' | ' + specs.gearbox + ' | ' + specs.drive + ' | ' + hkStr + '\n';
-  msg += 'ââââââââââââââââââââ\n\n';
-  msg += 'ð <b>FINN-SÃK</b>\n';
-  msg += (r.totalCount || comps.length) + ' treff | <a href="' + finnUrl + '">Ãpne sÃ¸k</a>\n';
-  msg += 'ââââââââââââââââââââ\n\n';
-  msg += 'ð <b>FINN KOMPS</b>\n';
-  comps.slice().sort((a,b) => a.price - b.price).slice(0,5).forEach((comp,i) => {
+  msg += r.regNr + '  |  ' + car.make + ' ' + car.model + ' ' + car.year + '  |  ' + car.km.toLocaleString('nb-NO') + ' km  |  ' + specs.fuel + '  |  ' + specs.gearbox + '  |  ' + specs.drive + '  |  ' + hkStr + '\n\n';
+  msg += '<b>FINN-SOK</b>  ' + specs.fuel + '  |  ' + car.year + '  |  ' + (r.totalCount || comps.length) + ' treff  |  <a href="' + finnUrl + '">Apne sok</a>\n';
+  if (r.finnListing) {
+    const gap = r.finnListing.price - r.lowestComp;
+    const gapStr = gap >= 0 ? '+' + Math.round(gap/1000) + 'k over anker' : Math.abs(Math.round(gap/1000)) + 'k under anker';
+    msg += '   Eigen annonse: <a href="https://www.finn.no/mobility/search/car?q=' + car.regNr + '">' + r.finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ')</a>\n';
+  } else {
+    msg += '   Eigen annonse: Ikke funnet\n';
+  }
+  msg += '\n';
+  comps.sort((a,b) => a.price - b.price).slice(0,5).forEach((comp,i) => {
     const isAnker = r.anchor && comp.price === r.anchor.price && comp.km === r.anchor.km;
-    msg += (isAnker ? 'â¶ ' : '  ') + (i+1) + '. ' + comp.price.toLocaleString('nb-NO') + ' kr | ' + comp.km.toLocaleString('nb-NO') + 'km | ' + (comp.year||'') + (isAnker ? ' â anker' : '') + '\n';
+    msg += (isAnker ? '> ' : '  ') + (i+1) + '.  ' + comp.price.toLocaleString('nb-NO') + ' kr  ' + comp.km.toLocaleString('nb-NO') + ' km  ' + (comp.year||'') + (isAnker ? '  <- anker' : '') + '\n';
   });
-  msg += 'Snitt: ' + fmtNOKstr(finnAvg) + '\n';
-  if (r.anchor && r.anchor.aiReason) msg += 'ð¤ ' + r.anchor.aiReason + '\n';
-  msg += 'ââââââââââââââââââââ\n\n';
-  msg += 'ð° <b>KALKYLE</b>\n';
-  msg += '   Anker:          ' + lowestComp.toLocaleString('nb-NO') + ' kr\n';
+  msg += '   Snitt: ' + fmtNOKstr(finnAvg) + '\n\n';
+  if (r.anchor && r.anchor.aiReason) msg += '<b>AI KOMMENTAR</b>\n' + r.anchor.aiReason + '\n\n';
+  msg += '<b>KALKYLE</b>\n';
+  msg += '   Anker:          ' + r.lowestComp.toLocaleString('nb-NO') + ' kr\n';
   msg += '   x 0.88:         ' + valuation.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
   msg += '   Peasy fee (U): -' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
   msg += '   D mid:          ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
-  msg += '<b>   Estimert:       ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n';
-  if (valuation.eBud) msg += '   Est. bud (E):  ~' + valuation.eBud.toLocaleString('nb-NO') + ' kr (' + (valuation.xPct >= 0 ? '+' : '') + (valuation.xPct * 100).toFixed(1) + '%)\n';
-  msg += 'ââââââââââââââââââââ\n\n';
-  if (r.finnListing) {
-    const gap = r.finnListing.price - lowestComp;
-    const gapStr = gap >= 0 ? '+' + Math.round(gap/1000) + 'k over anker' : Math.abs(Math.round(gap/1000)) + 'k under anker';
-    msg += 'Finn-annonse: â <a href="https://www.finn.no/mobility/search/car?q=' + car.regNr + '">' + r.finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ')</a>\n';
-  } else {
-    msg += 'Finn-annonse: â Ikke funnet\n';
-  }
-  msg += 'Heftelser: ' + r.heftelser + '\n';
-  if (r.sdComment) msg += '\n<b>KOMMENTAR FRA SELGER</b>\n' + r.sdComment.substring(0,300) + '\n';
-  msg += '\n<b>ERP</b>\n';
+  msg += '<b>   Estimert:      ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
+  msg += '<b>HEFTELSER</b>\n   ' + r.heftelser + '\n';
+  if (valuation.dMid < 10000) msg += '   NB: Lav okonomi - vurder manuelt\n';
+  msg += '\n';
+  if (r.sdComment) msg += '<b>KOMMENTAR FRA SELGER</b>\n   ' + r.sdComment.substring(0,300) + '\n\n';
+  msg += '<b>ERP</b>\n';
   const hasHeft = r.heftelser && r.heftelser.includes('registrert');
-  if (r.finnListing)           msg += 'â ï¸ Ikke skrevet â bil annonsert pa Finn\n';
-  else if (qa && !qa.approved) msg += 'ð¨ FLAGGET â ikke skrevet\nQA: ' + qa.reason + '\n';
-  else if (hasHeft)            msg += 'â Skrevet til ERP (heftelser â sjekk Finans)\n';
-  else                         msg += 'â Skrevet til ERP\n';
+  if (r.finnListing)            msg += '   Ikke skrevet - bil annonsert pa Finn\n';
+  else if (hasHeft)             msg += '   Ikke skrevet - heftelser registrert\n';
+  else if (qa && !qa.approved) { msg += '   Ikke skrevet - manuell gjennomgang\n   QA: ' + qa.reason + '\n'; }
+  else { msg += '   Skrevet til ERP\n'; if (qa) msg += '   QA: ' + qa.reason + '\n'; }
   return msg;
 }
 
@@ -533,10 +474,10 @@ async function run(force) {
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'nb-NO,nb;q=0.9' });
     for (const car of pendingCars) {
       if (car.hasSdComment) {
-        console.log(car.regNr + ' allerede priset (has_sd_comment=1) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ skip');
+        console.log(car.regNr + ' allerede priset (has_sd_comment=1) Ã¢ skip');
         continue;
       }
-      console.log('\n' + car.regNr + ' ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ' + car.make + ' ' + car.model + ' ' + car.year + ' ' + car.km + 'km');
+      console.log('\n' + car.regNr + ' Ã¢ÂÂ ' + car.make + ' ' + car.model + ' ' + car.year + ' ' + car.km + 'km');
       try {
         const specs = await getVegvesenData(car.regNr);
         console.log('  ' + specs.fuel + ' | ' + specs.gearbox + ' | ' + specs.drive + ' | ' + specs.kw + 'kW | bodyType:' + specs.bodyType);
@@ -551,7 +492,7 @@ async function run(force) {
         const lowestComp = anchor.price;
         const finnAvg    = Math.round(pool.reduce((s, c) => s + c.price, 0) / pool.length);
         const valuation  = calcValuation(lowestComp);
-        console.log('  D lav: ' + fmtNOKstr(valuation.dLow) + ' | D hÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸y: ' + fmtNOKstr(valuation.dHigh));
+        console.log('  D lav: ' + fmtNOKstr(valuation.dLow) + ' | D hÃÂ¸y: ' + fmtNOKstr(valuation.dHigh));
         let sdComment = null;
         if (car.hasSdComment && car.erpId) {
           const erpToken = await getERPToken();
@@ -560,12 +501,9 @@ async function run(force) {
         const qa = qaCheckComps(car, specs, pool, valuation);
         console.log('  QA:', qa.approved ? 'GODKJENT' : 'FLAGGET', '-', qa.reason);
         const hasHeftelser = heftelser && heftelser.includes('registrert');
-        if (car.erpId) {
+        if (car.erpId && !finnListing && !hasHeftelser && qa.approved) {
           const erpToken = await getERPToken();
           await writeARValueToERP(car.erpId, valuation.dLow, valuation.dHigh, heftelser, erpToken);
-          if ((car.source || '').toLowerCase() === 'driveno') await checkAndSaveERP(browser, car.erpId);
-          const evalText = formatSingleResult({ status: 'ok', regNr: car.regNr, car, specs, comps: pool, anchor, finnUrl, totalCount, finnAvg, lowestComp, valuation, heftelser, sdComment, finnListing, qa });
-          await postERPComment(car.erpId, evalText, erpToken);
           markProcessed(car.regNr, { make: car.make, model: car.model, year: car.year, finnAvg, lowestComp, dLow: valuation.dLow, dHigh: valuation.dHigh });
         } else if (finnListing) {
           console.log('  SKIP ERP: Car listed on Finn at ' + finnListing.price + ' kr');
@@ -671,7 +609,7 @@ async function pollTelegramCommands() {
               const found = [...allCars, ...allCars2].find(c => c.registration_number === regNr);
               if (found) erpCar = { km: found.mileage || 0, year: found.model_year || 0, erpId: found.id, hasSdComment: found.has_sd_comment === 1 };
             } catch(e) {}
-            if (regNr && !erpCar) { await sendTelegram('ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¯ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ' + regNr + ' ikke funnet i ERP-koen. Bilen er allerede behandlet eller ikke registrert.'); return; }
+            if (regNr && !erpCar) { await sendTelegram('Ã¢ÂÂ Ã¯Â¸Â ' + regNr + ' ikke funnet i ERP-koen. Bilen er allerede behandlet eller ikke registrert.'); return; }
             if (erpCar?.erpId) { try { const t = await getERPToken(); erpCar.comment = await getERPCarComment(erpCar.erpId, t); } catch(e) {} }
           }
           let br;
@@ -711,35 +649,35 @@ async function pollTelegramCommands() {
               const lowest = anchor ? anchor.price : Math.min(...comps.map(c => c.price));
               const val  = calcValuation(lowest);
               const hk = Math.round((carInfo?.kw || 0) * 1.36);
-              let reply = 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ <b>' + (regNr || '') + ' ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ' + (carInfo?.make || '') + ' ' + (carInfo?.model || '') + ' ' + carYear + '</b>\n';
+              let reply = 'Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ\n';
+              reply += 'Ã°ÂÂÂ <b>' + (regNr || '') + ' Ã¢ÂÂ ' + (carInfo?.make || '') + ' ' + (carInfo?.model || '') + ' ' + carYear + '</b>\n';
               reply += (carKm ? carKm.toLocaleString('nb-NO') : '0') + 'km | ' + (carInfo?.fuel || '') + ' | ' + (carInfo?.gearbox || '') + ' | ' + (carInfo?.drive || '') + ' | ' + hk + 'hk\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ\n\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ <b>FINN-SÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂK (MANUELL)</b>\n';
-              reply += comps.length + ' treff | <a href="' + finnUrl + '">ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂpne sÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸k</a>\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ\n\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ <b>FINN KOMPS</b>\n';
+              reply += 'Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ\n\n';
+              reply += 'Ã°ÂÂÂ <b>FINN-SÃÂK (MANUELL)</b>\n';
+              reply += comps.length + ' treff | <a href="' + finnUrl + '">ÃÂpne sÃÂ¸k</a>\n';
+              reply += 'Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ\n\n';
+              reply += 'Ã°ÂÂÂ <b>FINN KOMPS</b>\n';
               top5.forEach((c, i) => {
                 const isAnker = anchor && c.price === anchor.price && c.km === anchor.km;
-                reply += (i + 1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + 'km | ' + c.year + (isAnker ? ' ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ anker' : '') + '\n';
+                reply += (i + 1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + 'km | ' + c.year + (isAnker ? ' Ã¢ÂÂ anker' : '') + '\n';
               });
               reply += 'Snitt: <b>' + fmtNOKstr(avg) + '</b>\n';
-              if (anchor && anchor.aiReason) reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¤ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ' + anchor.aiReason + '\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ\n\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ° <b>KALKYLE</b>\n';
+              if (anchor && anchor.aiReason) reply += 'Ã°ÂÂ¤Â ' + anchor.aiReason + '\n';
+              reply += 'Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ\n\n';
+              reply += 'Ã°ÂÂÂ° <b>KALKYLE</b>\n';
               reply += 'Finn anker:       <b>' + lowest.toLocaleString('nb-NO') + ' kr</b>\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ 0.88 (T est):  ' + val.tEstimate.toLocaleString('nb-NO') + ' kr\n';
+              reply += 'ÃÂ 0.88 (T est):  ' + val.tEstimate.toLocaleString('nb-NO') + ' kr\n';
               reply += 'Peasy fee:        ' + val.fee.toLocaleString('nb-NO') + ' kr\n';
               reply += 'Selger T:         ' + val.sellerT.toLocaleString('nb-NO') + ' kr\n';
-              reply += '<b>D lav: ' + val.dLow.toLocaleString('nb-NO') + ' ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ D hÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸y: ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
-              if (finnListing) reply += 'Finn-annonse: ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ <a href="https://www.finn.no/mobility/search/car?q=' + regNr + '">' + finnListing.price.toLocaleString('nb-NO') + ' kr (' + finnListing.km.toLocaleString('nb-NO') + ' km)</a>\n';
+              reply += '<b>D lav: ' + val.dLow.toLocaleString('nb-NO') + ' Ã¢ÂÂ D hÃÂ¸y: ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n\n';
+              if (finnListing) reply += 'Finn-annonse: Ã¢ÂÂ <a href="https://www.finn.no/mobility/search/car?q=' + regNr + '">' + finnListing.price.toLocaleString('nb-NO') + ' kr (' + finnListing.km.toLocaleString('nb-NO') + ' km)</a>\n';
 
-              else reply += 'Finn-annonse: ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Ikke funnet\n';
+              else reply += 'Finn-annonse: Ã¢ÂÂ Ikke funnet\n';
               if (heftelser) reply += 'Heftelser: ' + heftelser + '\n';
               if (erpCar?.comment) reply += 'Kundekommentar: ' + erpCar.comment.substring(0, 300) + '\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ\n\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ <b>ERP</b>\n';
-              reply += 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¯ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¸ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Ikke skrevet ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ manuell gjennomgang\n';
+              reply += 'Ã¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂÃ¢ÂÂ\n\n';
+              reply += 'Ã°ÂÂÂ <b>ERP</b>\n';
+              reply += 'Ã¢ÂÂ Ã¯Â¸Â Ikke skrevet Ã¢ÂÂ manuell gjennomgang\n';
               await sendTelegram(reply);
             }
           } catch(e) {
@@ -752,28 +690,6 @@ async function pollTelegramCommands() {
   }, 5000);
 }
 
-
-async function checkAndSaveERP(browser, erpId) {
-  const ctx = await browser.newContext({ storageState: 'erpState.json' }).catch(() => browser.newContext());
-  const page = await ctx.newPage();
-  try {
-    await page.goto('https://biladministrasjon.no/cars_driveno/processing/estimating_temp/' + erpId, { waitUntil: 'networkidle', timeout: 20000 });
-    await page.waitForTimeout(2000);
-    const btn = await page.$('button:has-text("Lagre data og endre status")');
-    if (btn) {
-      await btn.click();
-      await page.waitForTimeout(2000);
-      console.log('  ERP: Lagre data og endre status clicked for ' + erpId);
-    } else {
-      console.log('  ERP: button not found for ' + erpId + ' (may already be in list 3)');
-    }
-  } catch(e) {
-    console.error('  checkAndSaveERP failed:', e.message);
-  } finally {
-    await page.close();
-    await ctx.close();
-  }
-}
 async function startScheduler() {
   console.log('peasy-auto started');
   await run();
