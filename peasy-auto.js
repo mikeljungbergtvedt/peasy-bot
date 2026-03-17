@@ -212,6 +212,27 @@ async function postERPComment(erpId, text, token) {
     else console.error('  ERP comment failed:', JSON.stringify(data));
   } catch(e) { console.error('  ERP comment error:', e.message); }
 }
+
+async function postERPComment(erpId, text, token) {
+  try {
+    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/' + erpId + '/comments', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comment: text })
+    });
+    const data = await res.json();
+    if (data.success || data.data) {
+      console.log('  ERP comment posted');
+      return true;
+    } else {
+      console.error('  ERP comment failed:', JSON.stringify(data).substring(0,100));
+      return false;
+    }
+  } catch(e) {
+    console.error('  ERP comment error:', e.message);
+    return false;
+  }
+}
 async function fetchPendingCars() {
   console.log('Fetching pending cars from ERP...');
   const token = await getERPToken();
@@ -585,6 +606,14 @@ async function run(force) {
           console.log('  SKIP ERP: Heftelser registrert');
         } else if (!qa.approved) {
           console.log('  SKIP ERP: QA flagget - ' + qa.reason);
+        }
+        // Always post eval card as ERP comment
+        if (car.erpId) {
+          const evalText = formatSingleResult({ status: 'ok', regNr: car.regNr, car, specs, comps: pool, anchor, finnUrl, totalCount, finnAvg, lowestComp, valuation, heftelser, sdComment, finnListing, qa });
+          // Strip HTML tags for ERP comment
+          const plainText = evalText.replace(/<[^>]+>/g, '').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&nbsp;/g,' ');
+          const erpTok = await getERPToken();
+          await postERPComment(car.erpId, plainText, erpTok);
         }
         results.push({ status: 'ok', regNr: car.regNr, car, specs, comps: pool, anchor, finnUrl, totalCount, finnAvg, lowestComp, valuation, heftelser, sdComment, finnListing, qa });
       } catch (err) {
