@@ -216,15 +216,10 @@ async function postERPComment(erpId, text, token) {
 
 async function postERPComment(erpId, text, token) {
   try {
-    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/' + erpId + '/comments', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comment: text })
-    });
+    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/' + erpId + '/comments', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ comment: text }) });
     const data = await res.json();
     if (data.success || data.data) { console.log('  ERP comment posted'); return true; }
-    console.error('  ERP comment failed:', JSON.stringify(data).substring(0,100));
-    return false;
+    console.error('  ERP comment failed:', JSON.stringify(data).substring(0,100)); return false;
   } catch(e) { console.error('  ERP comment error:', e.message); return false; }
 }
 async function fetchPendingCars() {
@@ -594,7 +589,7 @@ async function run(force) {
             await writeARValueToERP(car.erpId, newVal.dLow, newVal.dHigh, heftelser, erpToken2);
           }
         } else if (finnListing) {
-          console.log('  SKIP ERP: Car listed on Finn at ' + finnListing.price + ' kr (above anchor)');
+          console.log('  SKIP ERP: Finn listing above anchor, skipping');
         } else if (hasHeftelser) {
           console.log('  SKIP ERP: Heftelser registrert');
         } else if (!qa.approved) {
