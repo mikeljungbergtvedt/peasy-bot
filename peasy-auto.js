@@ -140,6 +140,7 @@ async function writeARValueToERP(erpId, priceMin, priceMax, heftelser, token) {
       price_final_max: formatNOK(priceMax),
       purchase_price_estimate_min: 1,
       purchase_price_estimate_max: 1,
+      auction_price_type_id: priceMin <= 75000 ? 2 : 1,
       encumbrance: { is_checked: true, has_debt: hasDebt, comment: heftelser || 'Ingen heftelser', date: today },
       owners_check_date: today,
       owners_check_comment: null,
@@ -221,17 +222,10 @@ async function postERPComment(erpId, text, token) {
       body: JSON.stringify({ comment: text })
     });
     const data = await res.json();
-    if (data.success || data.data) {
-      console.log('  ERP comment posted');
-      return true;
-    } else {
-      console.error('  ERP comment failed:', JSON.stringify(data).substring(0,100));
-      return false;
-    }
-  } catch(e) {
-    console.error('  ERP comment error:', e.message);
+    if (data.success || data.data) { console.log('  ERP comment posted'); return true; }
+    console.error('  ERP comment failed:', JSON.stringify(data).substring(0,100));
     return false;
-  }
+  } catch(e) { console.error('  ERP comment error:', e.message); return false; }
 }
 async function fetchPendingCars() {
   console.log('Fetching pending cars from ERP...');
@@ -593,7 +587,6 @@ async function run(force) {
           await postERPComment(car.erpId, evalText, erpToken);
           markProcessed(car.regNr, { make: car.make, model: car.model, year: car.year, finnAvg, lowestComp, dLow: valuation.dLow, dHigh: valuation.dHigh });
         } else if (finnListing && finnListing.price < lowestComp) {
-          // Finn listing is cheaper than anchor -> recalculate with finn price as anchor
           console.log('  Finn listing cheaper (' + finnListing.price + ' kr) -> using as anchor');
           const newVal = calcValuation(finnListing.price);
           if (car.erpId && !hasHeftelser && qa.approved) {
@@ -607,11 +600,9 @@ async function run(force) {
         } else if (!qa.approved) {
           console.log('  SKIP ERP: QA flagget - ' + qa.reason);
         }
-        // Always post eval card as ERP comment
         if (car.erpId) {
           const evalText = formatSingleResult({ status: 'ok', regNr: car.regNr, car, specs, comps: pool, anchor, finnUrl, totalCount, finnAvg, lowestComp, valuation, heftelser, sdComment, finnListing, qa });
-          // Strip HTML tags for ERP comment
-          const plainText = evalText.replace(/<[^>]+>/g, '').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&nbsp;/g,' ');
+          const plainText = evalText.replace(/<[^>]+>/g, '').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
           const erpTok = await getERPToken();
           await postERPComment(car.erpId, plainText, erpTok);
         }
