@@ -1,24 +1,24 @@
 // ============================================================
-// peasy-auto.js v18.03.o
-// Peasy C2B Bruktbil â Automatisk evaluering
+// peasy-auto.js v18.03.n
+// Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
 // Design: peasy-system-reference.html v2.0
 //
 // Moduler:
-//   main()             â starter scheduler og Telegram-polling
-//   runOnce()          â henter liste 3, looper biler
-//   evalCar()          â koordinator per bil
-//   getVegvesenData()  â henter bildata fra Vegvesen
-//   getFinnComps()     â Finn-sok med km-filter (Playwright)
-//   getAnchor()        â AI-ankervalg via Claude Haiku
-//   calcValuation()    â prisformel (T, fee, D mid, D lav/hoy, E)
-//   checkFinnListing() â sjekker om bilen er pa Finn
-//   checkBrreg()       â heftelsessjekk via Playwright
-//   writeToERP()       â PUT med alle EC-24 felter
-//   postToChat()       â POST til intern kommentar, kun 1 gang
-//   sendTelegram()     â sender eval-kort
-//   checkTeslaPrices() â Tesla prisovervaking (aktiv ut mars 2026)
+//   main()             — starter scheduler og Telegram-polling
+//   runOnce()          — henter liste 3, looper biler
+//   evalCar()          — koordinator per bil
+//   getVegvesenData()  — henter bildata fra Vegvesen
+//   getFinnComps()     — Finn-sok med km-filter (Playwright)
+//   getAnchor()        — AI-ankervalg via Claude Haiku
+//   calcValuation()    — prisformel (T, fee, D mid, D lav/hoy, E)
+//   checkFinnListing() — sjekker om bilen er pa Finn
+//   checkBrreg()       — heftelsessjekk via Playwright
+//   writeToERP()       — PUT med alle EC-24 felter
+//   postToChat()       — POST til intern kommentar, kun 1 gang
+//   sendTelegram()     — sender eval-kort
+//   checkTeslaPrices() — Tesla prisovervaking (aktiv ut mars 2026)
 // ============================================================
 
 'use strict';
@@ -28,12 +28,12 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.o';
+const VERSION = 'v18.03.n';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
 
-// ââ Enkelt-instans las ââââââââââââââââââââââââââââââââââââââââ
+// ── Enkelt-instans las ────────────────────────────────────────
 try {
   const old = fs.existsSync(LOCK_FILE) && parseInt(fs.readFileSync(LOCK_FILE, 'utf8'));
   if (old && old !== process.pid) {
@@ -43,7 +43,7 @@ try {
 fs.writeFileSync(LOCK_FILE, String(process.pid));
 process.on('exit', () => { try { fs.unlinkSync(LOCK_FILE); } catch (e) {} });
 
-// ââ Konfigurasjon âââââââââââââââââââââââââââââââââââââââââââââ
+// ── Konfigurasjon ─────────────────────────────────────────────
 const CONFIG = {
   version: VERSION,
   schedule: { startHour: 7, endHour: 17 },
@@ -67,7 +67,7 @@ const CONFIG = {
   ],
 };
 
-// ââ Logging âââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Logging ───────────────────────────────────────────────────
 function log(msg) {
   console.log(`[${new Date().toISOString()}] [${VERSION}] ${msg}`);
 }
@@ -75,7 +75,7 @@ function logErr(ctx, err) {
   console.error(`[${new Date().toISOString()}] [${VERSION}] FEIL [${ctx}]`, err?.message || err || '');
 }
 
-// ââ Filhjelp ââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Filhjelp ──────────────────────────────────────────────────
 function loadJSON(file) {
   try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (e) { logErr('loadJSON', e); }
@@ -86,7 +86,7 @@ function saveJSON(file, data) {
   catch (e) { logErr('saveJSON', e); }
 }
 
-// ââ Cache âââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Cache ─────────────────────────────────────────────────────
 function isInCache(cache, erpId) { return !!cache[String(erpId)]; }
 function addToCache(cache, erpId) {
   cache[String(erpId)] = new Date().toISOString();
@@ -94,7 +94,7 @@ function addToCache(cache, erpId) {
   log(`Cache: ${erpId} lagt til`);
 }
 
-// ââ ERP Auth ââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── ERP Auth ──────────────────────────────────────────────────
 let _erpToken = null;
 let _erpTokenExpiry = null;
 
@@ -116,7 +116,7 @@ async function getErpToken() {
 
 function authH(token) { return { 'Authorization': `Bearer ${token}` }; }
 
-// ââ ERP: Hent liste 3 âââââââââââââââââââââââââââââââââââââââââ
+// ── ERP: Hent liste 3 ─────────────────────────────────────────
 async function getListe3() {
   log('ERP: henter liste 3...');
   const token = await getErpToken();
@@ -130,7 +130,7 @@ async function getListe3() {
   return biler;
 }
 
-// ââ ERP: Hent bildetaljer âââââââââââââââââââââââââââââââââââââ
+// ── ERP: Hent bildetaljer ─────────────────────────────────────
 async function getErpCarDetail(erpId, token) {
   const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}`, {
     headers: authH(token),
@@ -139,7 +139,7 @@ async function getErpCarDetail(erpId, token) {
   return data.data?.car || null;
 }
 
-// ââ ERP: Fyll inn felt via Playwright UI ââââââââââââââââââââââ
+// ── ERP: Fyll inn felt via Playwright UI ──────────────────────
 async function fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg) {
   log(`ERP UI: oppdaterer bil ${erpId}...`);
   let browser;
@@ -170,7 +170,7 @@ async function fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg) {
     await page.selectOption('#auction_price_type_id', String(auctionTypeId));
     await page.waitForTimeout(500);
 
-    // Heftelser kontrollert (alltid pÃ¥)
+    // Heftelser kontrollert (alltid på)
     const encumbrance = page.locator('#encumbrances');
     if (!await encumbrance.isChecked()) {
       await encumbrance.click();
@@ -186,7 +186,7 @@ async function fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg) {
       }
     }
 
-    // Eiere sjekket (alltid pÃ¥)
+    // Eiere sjekket (alltid på)
     const owners = page.locator('#owners\\.checked_hint');
     if (!await owners.isChecked()) {
       await owners.click();
@@ -207,7 +207,7 @@ async function fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg) {
   }
 }
 
-// ââ ERP: Skriv D lav/hÃ¸y via API + fyll UI via Playwright âââââ
+// ── ERP: Skriv D lav/høy via API + fyll UI via Playwright ─────
 async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, brreg, token) {
   log(`ERP: PUT D lav/hoy for bil ${erpId}...`);
   const payload = { price_final_min: dLav, price_final_max: dHoy };
@@ -222,7 +222,7 @@ async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, brreg, tok
   return await fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg);
 }
 
-// ââ ERP: Post eval-kort til intern kommentar (kun 1 gang) âââââ
+// ── ERP: Post eval-kort til intern kommentar (kun 1 gang) ─────
 async function postToChat(erpId, evalText, token) {
   // Sjekk eksisterende kommentarer
   const checkRes = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}/comments/all`, {
@@ -233,7 +233,7 @@ async function postToChat(erpId, evalText, token) {
 
   // Hopp over hvis Peasy-kommentar allerede finnes
   if (existing.some(c => (c.comment || '').includes('BIL TIL ESTIMERING'))) {
-    log(`Kommentar: bil ${erpId} har allerede eval-kort â skipper`);
+    log(`Kommentar: bil ${erpId} har allerede eval-kort — skipper`);
     return false;
   }
 
@@ -250,7 +250,7 @@ async function postToChat(erpId, evalText, token) {
   return false;
 }
 
-// ââ Telegram ââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Telegram ──────────────────────────────────────────────────
 async function sendTelegram(text) {
   try {
     await fetch(`https://api.telegram.org/bot${CONFIG.telegram.token}/sendMessage`, {
@@ -266,7 +266,7 @@ async function sendTelegram(text) {
   } catch (e) { logErr('sendTelegram', e); }
 }
 
-// ââ Vegvesen ââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Vegvesen ──────────────────────────────────────────────────
 async function getVegvesenData(regnr) {
   const res = await fetch(
     `https://akfell-datautlevering.atlas.vegvesen.no/enkeltoppslag/kjoretoydata?kjennemerke=${regnr.replace(/\s/g, '')}`,
@@ -304,7 +304,7 @@ async function getVegvesenData(regnr) {
   };
 }
 
-// ââ Finn ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Finn ──────────────────────────────────────────────────────
 function getFinnFuelCode(fuel) {
   const f = fuel.toLowerCase();
   if (f.includes('elektr')) return '4';
@@ -366,7 +366,7 @@ async function getFinnComps(bil, vegData, page) {
 
   const bands = [30000, 50000, 80000, 150000];
 
-  // Steg 1: sÃ¸k med fuel-filter og km-band
+  // Steg 1: søk med fuel-filter og km-band
   const urlVariants = bands.slice(0, 3).map((band, i) => {
     const yr = i === 0 ? [yFrom, yTo] : i === 1 ? [yFrom - 1, yTo + 1] : [yFrom - 2, yTo + 2];
     const kmFrom = Math.max(0, bil.mileage - band);
@@ -397,8 +397,8 @@ async function getFinnComps(bil, vegData, page) {
       }
       if (allComps.length >= 10) break;
     }
-    if (allComps.length > 0) break; // fant noe â ikke prÃ¸v no-fuel
-    log('Finn: 0 treff med fuel-filter â prover uten fuel');
+    if (allComps.length > 0) break; // fant noe — ikke prøv no-fuel
+    log('Finn: 0 treff med fuel-filter — prover uten fuel');
   }
 
   // Km-filter
@@ -432,7 +432,7 @@ async function checkFinnListing(regnr, page) {
   } catch (e) { logErr(`checkFinnListing ${regnr}`, e); return null; }
 }
 
-// ââ Brreg âââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Brreg ─────────────────────────────────────────────────────
 async function checkBrreg(regnr, page) {
   try {
     await page.goto(
@@ -452,14 +452,14 @@ async function checkBrreg(regnr, page) {
   }
 }
 
-// ââ AI-anker ââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── AI-anker ──────────────────────────────────────────────────
 async function getAnchor(pool, bil, vegData) {
   const top5 = pool.slice(0, 5);
 
-  // Filtrer ut prisuliggere â biler under 40% av snitt er trolig skrap/feil data
+  // Filtrer ut prisuliggere — biler under 40% av snitt er trolig skrap/feil data
   const snitt = top5.reduce((s, c) => s + c.price, 0) / top5.length;
   const filtered = top5.filter(c => c.price >= snitt * 0.4);
-  const working = filtered.length >= 2 ? filtered : top5; // fallback hvis for fÃ¥ igjen
+  const working = filtered.length >= 2 ? filtered : top5; // fallback hvis for få igjen
   const hk = Math.round((vegData.kw || 0) * 1.36);
   const listings = working.map((c, i) =>
     `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`
@@ -472,9 +472,9 @@ Sammenlignbare biler fra Finn (sortert billigst):
 ${listings}
 
 Vurder HVER bil og velg billigste reelle alternativ som anker.
-En reell bil mÃ¥ ha:
+En reell bil må ha:
 - Pris som er realistisk for modellen (ikke under 30% av snitt i listen)
-- Ãrstall som stemmer (ikke fremtidig Ã¥rstall)
+- Årstall som stemmer (ikke fremtidig årstall)
 - Km som er realistisk for en bruktbil
 
 Svar KUN med JSON:
@@ -520,7 +520,7 @@ Svar KUN med JSON:
   }
 }
 
-// ââ Dynamisk xPct fra Pulse âââââââââââââââââââââââââââââââââââ
+// ── Dynamisk xPct fra Pulse ───────────────────────────────────
 let _brackets = null;
 
 async function fetchBrackets() {
@@ -543,7 +543,7 @@ function getRecX(dMid) {
   return               { xPct: b?.premium ?? CONFIG.pdec1.premium, bracket: 'Premium' };
 }
 
-// ââ Prisformel ââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Prisformel ────────────────────────────────────────────────
 function calcValuation(anchorPrice) {
   const t88 = Math.round(anchorPrice * 0.88 / 1000) * 1000;
   const tFloor = anchorPrice - 10000;
@@ -565,10 +565,10 @@ function calcValuation(anchorPrice) {
   return { T, t88, minMarginUsed, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId };
 }
 
-// ââ Formater eval-kort ââââââââââââââââââââââââââââââââââââââââ
+// ── Formater eval-kort ────────────────────────────────────────
 function formatEvalCard(p) {
   const source = (p.bil.source || '').toLowerCase() === 'driveno' ? 'DRIVE' : 'PEASY';
-  const qaTag = p.qaOverride ? ' â¡ QA OVERRIDE' : '';
+  const qaTag = p.qaOverride ? ' ⚡ QA OVERRIDE' : '';
   const isEl = p.vegData.fuel.toLowerCase().includes('elektr');
   const hkStr = isEl
     ? (p.vegData.range ? `${p.vegData.range} km rekkevidde` : `${p.vegData.kw} kW`)
@@ -578,7 +578,7 @@ function formatEvalCard(p) {
   const compLines = top5.map((c, i) => {
     const isAnker = i === p.anchor.index;
     const line = `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`;
-    return isAnker ? `<b>â¶ ${line} â anker</b>` : `   ${line}`;
+    return isAnker ? `<b>▶ ${line} ← anker</b>` : `   ${line}`;
   }).join('\n');
   const snitt = Math.round(top5.reduce((s, c) => s + c.price, 0) / top5.length);
 
@@ -596,15 +596,15 @@ function formatEvalCard(p) {
 
   // EC-24
   const erpLines = [
-    p.erpWritten ? 'â D lav/hoy skrevet' : 'â D lav/hoy FEILET',
-    p.erpWritten ? `â Auction type: ${p.valuation.auctionTypeId === 2 ? '2 Lower price (â¤35k)' : '1 Regular (>35k)'}` : 'â Auction type ikke satt',
-    p.erpWritten ? 'â Heftelser kontrollert' : 'â Heftelser ikke toglet',
+    p.erpWritten ? '✅ D lav/hoy skrevet' : '❌ D lav/hoy FEILET',
+    p.erpWritten ? `✅ Auction type: ${p.valuation.auctionTypeId === 2 ? '2 Lower price (≤35k)' : '1 Regular (>35k)'}` : '❌ Auction type ikke satt',
+    p.erpWritten ? '✅ Heftelser kontrollert' : '❌ Heftelser ikke toglet',
     p.brreg.anyDebts
-      ? (p.erpWritten ? 'â Finans? satt (heftelser funnet)' : 'â Finans? ikke satt')
-      : 'â Finans? ikke aktuelt',
-    p.erpWritten ? 'â Eiere sjekket' : 'â Eiere ikke toglet',
-    p.erpWritten ? 'â Lagre data klikket' : 'â Lagre data ikke klikket',
-    p.chatPosted ? 'â Eval-kort postet til kommentar' : 'â Kommentar: allerede postet',
+      ? (p.erpWritten ? '✅ Finans? satt (heftelser funnet)' : '❌ Finans? ikke satt')
+      : '— Finans? ikke aktuelt',
+    p.erpWritten ? '✅ Eiere sjekket' : '❌ Eiere ikke toglet',
+    p.erpWritten ? '✅ Lagre data klikket' : '❌ Lagre data ikke klikket',
+    p.chatPosted ? '✅ Eval-kort postet til kommentar' : '— Kommentar: allerede postet',
   ].join('\n');
 
   return [
@@ -640,7 +640,7 @@ function formatEvalCard(p) {
   ].join('\n');
 }
 
-// ââ Evaluer en bil ââââââââââââââââââââââââââââââââââââââââââââ
+// ── Evaluer en bil ────────────────────────────────────────────
 async function evalCar(bil, page, cache, opts = {}) {
   const { qaOverrideUrl = null } = opts;
   const regnr = bil.registration_number;
@@ -649,7 +649,7 @@ async function evalCar(bil, page, cache, opts = {}) {
   log(`--- ${regnr} (ERP ${erpId}) ---`);
 
   if (!qaOverrideUrl && isInCache(cache, erpId)) {
-    log(`Cache: ${regnr} allerede skrevet â hopper over`);
+    log(`Cache: ${regnr} allerede skrevet — hopper over`);
     return;
   }
 
@@ -676,7 +676,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     }
 
     if (pool.length === 0) {
-      await sendTelegram(`â ï¸ ${regnr}: Ingen Finn-komper funnet\n<a href="${finnUrl}">Ãpne Finn-sÃ¸k</a>`);
+      await sendTelegram(`⚠️ ${regnr}: Ingen Finn-komper funnet\n<a href="${finnUrl}">Åpne Finn-søk</a>`);
       return;
     }
 
@@ -686,10 +686,10 @@ async function evalCar(bil, page, cache, opts = {}) {
     // 4. AI-anker
     const anchor = await getAnchor(pool, bil, vegData);
 
-    // Finn < pool-anker â bruk Finn-pris
+    // Finn < pool-anker → bruk Finn-pris
     const lowestPool = Math.min(...pool.map(c => c.price));
     if (finnListing && finnListing.price < lowestPool) {
-      log(`Finn-pris (${finnListing.price}) < pool-anker (${lowestPool}) â bruker Finn som anker`);
+      log(`Finn-pris (${finnListing.price}) < pool-anker (${lowestPool}) → bruker Finn som anker`);
       anchor.price = finnListing.price;
     }
 
@@ -732,11 +732,11 @@ async function evalCar(bil, page, cache, opts = {}) {
 
   } catch (err) {
     logErr(`evalCar ${regnr}`, err);
-    await sendTelegram(`â Feil ved evaluering av ${regnr}: ${err.message}`);
+    await sendTelegram(`❌ Feil ved evaluering av ${regnr}: ${err.message}`);
   }
 }
 
-// ââ Tesla prisovervaking (aktiv ut mars 2026) âââââââââââââââââ
+// ── Tesla prisovervaking (aktiv ut mars 2026) ─────────────────
 async function checkTeslaPrices() {
   const now = new Date();
   if (now.getFullYear() > 2026 || (now.getFullYear() === 2026 && now.getMonth() > 2)) {
@@ -777,7 +777,7 @@ async function checkTeslaPrices() {
     saveJSON(TESLA_CACHE_FILE, newCache);
 
     if (alerts.length > 0) {
-      let msg = 'ð TESLA MODEL 3 PRISREDUKSJON\n\n';
+      let msg = '🚗 TESLA MODEL 3 PRISREDUKSJON\n\n';
       for (const a of alerts) {
         msg += `Model 3 ${a.trimName}\n`;
         if (!a.isNew) msg += `Senket med ${a.drop.toLocaleString('nb-NO')} kr | Var: ${a.oldPrice.toLocaleString('nb-NO')} kr\n`;
@@ -790,7 +790,7 @@ async function checkTeslaPrices() {
   } catch (e) { logErr('checkTeslaPrices', e); }
 }
 
-// ââ Kjoring âââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Kjoring ───────────────────────────────────────────────────
 async function runOnce(cache, force = false) {
   const hour = new Date().getHours();
   if (!force && (hour < CONFIG.schedule.startHour || hour >= CONFIG.schedule.endHour)) {
@@ -816,14 +816,14 @@ async function runOnce(cache, force = false) {
     }
   } catch (err) {
     logErr('runOnce', err);
-    await sendTelegram(`â peasy-auto fatal feil: ${err.message}`);
+    await sendTelegram(`❌ peasy-auto fatal feil: ${err.message}`);
   } finally {
     if (browser) { try { await browser.close(); } catch (e) {} }
   }
   log('=== Kjoring ferdig ===');
 }
 
-// ââ Telegram polling ââââââââââââââââââââââââââââââââââââââââââ
+// ── Telegram polling ──────────────────────────────────────────
 let _lastUpdateId = 0;
 
 async function pollTelegramCommands(cache) {
@@ -841,13 +841,13 @@ async function pollTelegramCommands(cache) {
 
         if (text === '/run') {
           log('/run mottatt');
-          await sendTelegram('â¶ï¸ Kjoring startet...');
+          await sendTelegram('▶️ Kjoring startet...');
           runOnce(cache, true);
         }
 
         if (text === '/status') {
           await sendTelegram(
-            `â Peasy Auto ${VERSION}\n` +
+            `✅ Peasy Auto ${VERSION}\n` +
             `Brackets: ${_brackets ? 'dynamisk fra Pulse' : 'PDEC1 fallback'}\n` +
             `Cache: ${Object.keys(cache).length} biler\n` +
             `Tidspunkt: ${new Date().toLocaleTimeString('nb-NO')}`
@@ -860,13 +860,13 @@ async function pollTelegramCommands(cache) {
           const regnr = parts[0]?.toUpperCase();
           const qaUrl = parts.slice(1).join(' ') || null;
 
-          if (!regnr) { await sendTelegram('â ï¸ Format: /finn REGNR [finn-url]'); continue; }
+          if (!regnr) { await sendTelegram('⚠️ Format: /finn REGNR [finn-url]'); continue; }
 
-          await sendTelegram(`ð Henter data for ${regnr}...`);
+          await sendTelegram(`🔍 Henter data for ${regnr}...`);
           try {
             const liste3 = await getListe3();
             const bil = liste3.find(b => b.registration_number?.toUpperCase() === regnr);
-            if (!bil) { await sendTelegram(`â ï¸ ${regnr}: ikke funnet pa liste 3`); continue; }
+            if (!bil) { await sendTelegram(`⚠️ ${regnr}: ikke funnet pa liste 3`); continue; }
 
             await fetchBrackets();
             let br;
@@ -880,7 +880,7 @@ async function pollTelegramCommands(cache) {
             }
           } catch (err) {
             logErr('/finn', err);
-            await sendTelegram(`â /finn feil: ${err.message}`);
+            await sendTelegram(`❌ /finn feil: ${err.message}`);
           }
         }
       }
@@ -888,7 +888,7 @@ async function pollTelegramCommands(cache) {
   }, 5000);
 }
 
-// ââ Start âââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── Start ─────────────────────────────────────────────────────
 async function main() {
   log(`Peasy Auto ${VERSION} starter`);
 
@@ -902,7 +902,7 @@ async function main() {
   const cache = loadJSON(CACHE_FILE);
   log(`Cache: ${Object.keys(cache).length} biler allerede skrevet`);
 
-  await sendTelegram(`ð Peasy Auto ${VERSION} startet`);
+  await sendTelegram(`🚀 Peasy Auto ${VERSION} startet`);
   await runOnce(cache);
 
   pollTelegramCommands(cache);
