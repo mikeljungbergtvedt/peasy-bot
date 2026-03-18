@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.j
+// peasy-auto.js v18.03.k
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.j';
+const VERSION = 'v18.03.k';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -139,39 +139,87 @@ async function getErpCarDetail(erpId, token) {
   return data.data?.car || null;
 }
 
-// ── ERP: Skriv alle felt via API PUT ─────────────────────────
+// ── ERP: Fyll inn felt via Playwright UI ──────────────────────
+async function fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg) {
+  log(`ERP UI: oppdaterer bil ${erpId}...`);
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: false,
+      args: ['--no-sandbox', '--disable-dev-shm-usage']
+    });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    // Logg inn
+    await page.goto('https://biladministrasjon.no/login', { waitUntil: 'networkidle', timeout: 20000 });
+    await page.fill('input[name="email"]', process.env.ERP_USER);
+    await page.fill('input[name="password"]', process.env.ERP_PASS);
+    await page.click('button[type="submit"]');
+    await page.waitForURL('**/dashboard**', { timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(2000);
+    log('ERP UI: innlogget');
+
+    // Naviger til bilen
+    await page.goto(`https://biladministrasjon.no/cars_driveno/processing/estimating_final/${erpId}`, {
+      waitUntil: 'networkidle', timeout: 20000
+    });
+    await page.waitForTimeout(2000);
+
+    // Auction type
+    await page.selectOption('#auction_price_type_id', String(auctionTypeId));
+    await page.waitForTimeout(500);
+
+    // Heftelser kontrollert (alltid på)
+    const encumbrance = page.locator('#encumbrances');
+    if (!await encumbrance.isChecked()) {
+      await encumbrance.click();
+      await page.waitForTimeout(500);
+    }
+
+    // Finans kun hvis heftelser
+    if (anyDebts) {
+      const anyDebtsEl = page.locator('#encumbrances_any_debts');
+      if (!await anyDebtsEl.isChecked()) {
+        await anyDebtsEl.click();
+        await page.waitForTimeout(500);
+      }
+    }
+
+    // Eiere sjekket (alltid på)
+    const owners = page.locator('#owners\\.checked_hint');
+    if (!await owners.isChecked()) {
+      await owners.click();
+      await page.waitForTimeout(500);
+    }
+
+    // Lagre data
+    await page.click('button.btn-primary:has-text("Lagre data")');
+    await page.waitForTimeout(2000);
+
+    log(`ERP UI: bil ${erpId} lagret OK`);
+    return true;
+  } catch (err) {
+    logErr(`fillErpViaBrowser ${erpId}`, err);
+    return false;
+  } finally {
+    if (browser) { try { await browser.close(); } catch (e) {} }
+  }
+}
+
+// ── ERP: Skriv D lav/høy via API + fyll UI via Playwright ─────
 async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, brreg, token) {
-  log(`ERP: PUT bil ${erpId}...`);
-  const today = new Date().toISOString().split('T')[0];
-
-  const payload = {
-    price_final_min: dLav,
-    price_final_max: dHoy,
-    auction_price_type_id: auctionTypeId,
-    encumbrance: {
-      is_checked: true,
-      has_debt: anyDebts,
-      comment: brreg.text || 'Ingen heftelser',
-      date: today,
-    },
-    owners_is_checked: true,
-    owners_check_date: today,
-  };
-  if (anyDebts) payload.finance = { has_finance: true };
-
+  log(`ERP: PUT D lav/hoy for bil ${erpId}...`);
+  const payload = { price_final_min: dLav, price_final_max: dHoy };
   const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}`, {
     method: 'PUT',
     headers: { ...authH(token), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-
-  if (data.success) {
-    log(`ERP: bil ${erpId} OK — dLav=${dLav}, dHoy=${dHoy}, type=${auctionTypeId}, heftelser=${anyDebts}`);
-    return true;
-  }
-  logErr(`writeToERP ${erpId}`, data);
-  return false;
+  if (!data.success) { logErr(`writeToERP PUT ${erpId}`, data); return false; }
+  log(`ERP: D lav/hoy OK`);
+  return await fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg);
 }
 
 // ── ERP: Post eval-kort til intern kommentar (kun 1 gang) ─────
