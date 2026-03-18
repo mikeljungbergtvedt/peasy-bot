@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.k
+// peasy-auto.js v18.03.n
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.k';
+const VERSION = 'v18.03.n';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -313,7 +313,7 @@ function getFinnFuelCode(fuel) {
   return '1';
 }
 
-function buildFinnUrl(make, model, yearFrom, yearTo, vegData, noFuel = false) {
+function buildFinnUrl(make, model, yearFrom, yearTo, vegData, noFuel = false, kmFrom = 0, kmTo = 0) {
   const regClass = vegData.isVarebil ? '2' : '1';
   const cleanMake = make
     .replace(/\s*MOTORS\s*/i, '')
@@ -321,7 +321,9 @@ function buildFinnUrl(make, model, yearFrom, yearTo, vegData, noFuel = false) {
     .trim();
   const q = `${cleanMake} ${model}`;
   const fuelParam = noFuel ? '' : `&fuel=${getFinnFuelCode(vegData.fuel)}`;
-  return `https://www.finn.no/mobility/search/car?sales_form=1&registration_class=${regClass}&q=${encodeURIComponent(q)}${fuelParam}&year_from=${yearFrom}&year_to=${yearTo}&sort=MILEAGE_ASC`;
+  const kmFromParam = kmFrom > 0 ? `&mileage_from=${kmFrom}` : '';
+  const kmToParam = kmTo > 0 ? `&mileage_to=${kmTo}` : '';
+  return `https://www.finn.no/mobility/search/car?sales_form=1&registration_class=${regClass}&q=${encodeURIComponent(q)}${fuelParam}&year_from=${yearFrom}&year_to=${yearTo}&price_from=15000&sort=PRICE_ASC${kmFromParam}${kmToParam}`;
 }
 
 async function scrapeFinnUrl(url, page) {
@@ -362,19 +364,23 @@ async function getFinnComps(bil, vegData, page) {
   const yFrom = yBase;
   const yTo = vegData.firstRegMonth >= 9 ? yBase + 1 : yBase;
 
-  // Steg 1: søk med fuel-filter
-  const urlVariants = [
-    buildFinnUrl(vegData.make, bil.model_series || '', yFrom,     yTo,     vegData),
-    buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 1, yTo + 1, vegData),
-    buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 2, yTo + 2, vegData),
-  ];
+  const bands = [30000, 50000, 80000, 150000];
 
-  // Steg 2: hvis 0 treff på alle — prøv uten fuel-filter
-  const noFuelVariants = [
-    buildFinnUrl(vegData.make, bil.model_series || '', yFrom,     yTo,     vegData, true),
-    buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 1, yTo + 1, vegData, true),
-    buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 2, yTo + 2, vegData, true),
-  ];
+  // Steg 1: søk med fuel-filter og km-band
+  const urlVariants = bands.slice(0, 3).map((band, i) => {
+    const yr = i === 0 ? [yFrom, yTo] : i === 1 ? [yFrom - 1, yTo + 1] : [yFrom - 2, yTo + 2];
+    const kmFrom = Math.max(0, bil.mileage - band);
+    const kmTo = bil.mileage + band;
+    return buildFinnUrl(vegData.make, bil.model_series || '', yr[0], yr[1], vegData, false, kmFrom, kmTo);
+  });
+
+  // Steg 2: ingen fuel-filter hvis 0 treff
+  const noFuelVariants = bands.slice(0, 3).map((band, i) => {
+    const yr = i === 0 ? [yFrom, yTo] : i === 1 ? [yFrom - 1, yTo + 1] : [yFrom - 2, yTo + 2];
+    const kmFrom = Math.max(0, bil.mileage - band);
+    const kmTo = bil.mileage + band;
+    return buildFinnUrl(vegData.make, bil.model_series || '', yr[0], yr[1], vegData, true, kmFrom, kmTo);
+  });
 
   const seen = new Set();
   let allComps = [];
@@ -449,19 +455,35 @@ async function checkBrreg(regnr, page) {
 // ── AI-anker ──────────────────────────────────────────────────
 async function getAnchor(pool, bil, vegData) {
   const top5 = pool.slice(0, 5);
+
+  // Filtrer ut prisuliggere — biler under 40% av snitt er trolig skrap/feil data
+  const snitt = top5.reduce((s, c) => s + c.price, 0) / top5.length;
+  const filtered = top5.filter(c => c.price >= snitt * 0.4);
+  const working = filtered.length >= 2 ? filtered : top5; // fallback hvis for få igjen
   const hk = Math.round((vegData.kw || 0) * 1.36);
-  const listings = top5.map((c, i) =>
+  const listings = working.map((c, i) =>
     `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`
   ).join('\n');
 
   const prompt = `Du er bruktbilekspert i Norge for Peasy (C2B auksjon).
 Bilen som prises: ${bil.model_year || ''} ${vegData.make} ${bil.model_series || ''}, ${(bil.mileage || 0).toLocaleString('nb-NO')} km, ${vegData.fuel}, ${hk} hk
 
-Sammenlignbare biler (sortert billigst):
+Sammenlignbare biler fra Finn (sortert billigst):
 ${listings}
 
-Velg billigste reelle alternativ. Ignorer skadet, demo, feil variant.
-Svar KUN med JSON: {"index": N, "price": PRIS, "reason": "en setning pa norsk"}`;
+Vurder HVER bil og velg billigste reelle alternativ som anker.
+En reell bil må ha:
+- Pris som er realistisk for modellen (ikke under 30% av snitt i listen)
+- Årstall som stemmer (ikke fremtidig årstall)
+- Km som er realistisk for en bruktbil
+
+Svar KUN med JSON:
+{
+  "index": N,
+  "price": PRIS,
+  "reason": "Valgte bil N fordi [begrunnelse]. [Forkastede biler og hvorfor].",
+  "rejected": ["Bil X: [grunn]", "Bil Y: [grunn]"]
+}`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -480,18 +502,21 @@ Svar KUN med JSON: {"index": N, "price": PRIS, "reason": "en setning pa norsk"}`
     const data = await res.json();
     const text = data.content?.[0]?.text || '';
     const json = JSON.parse(text.replace(/```json|```/g, '').trim());
-    const chosen = top5[json.index - 1] || top5[0];
+    const chosen = working[json.index - 1] || working[0];
 
-    // Anchor bug fix: bruk Math.min fra pool
-    const lowestPrice = Math.min(...top5.map(c => c.price));
+    const lowestPrice = Math.min(...working.map(c => c.price));
     const anchorPrice = Math.min(chosen.price, lowestPrice);
     const anchorIndex = top5.findIndex(c => c.price === anchorPrice);
 
-    log(`Haiku: anker = ${anchorPrice} kr (index ${anchorIndex + 1}) | ${json.reason}`);
-    return { price: anchorPrice, index: anchorIndex, reason: json.reason, car: top5[anchorIndex] };
+    // Bygg full refleksjon for eval-kortet
+    const rejected = json.rejected?.length ? '\nForkastet: ' + json.rejected.join(' | ') : '';
+    const fullReason = json.reason + rejected;
+
+    log(`Haiku: anker = ${anchorPrice} kr | ${json.reason}`);
+    return { price: anchorPrice, index: anchorIndex >= 0 ? anchorIndex : 0, reason: fullReason, car: top5[anchorIndex >= 0 ? anchorIndex : 0] };
   } catch (e) {
     logErr('getAnchor', e);
-    return { price: top5[0].price, index: 0, reason: 'Billigste i pool (AI fallback)', car: top5[0] };
+    return { price: working[0].price, index: 0, reason: 'Billigste i pool (AI fallback)', car: working[0] };
   }
 }
 
