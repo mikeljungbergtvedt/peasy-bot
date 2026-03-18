@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.g
+// peasy-auto.js v18.03.i
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.g';
+const VERSION = 'v18.03.i';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -297,15 +297,15 @@ function getFinnFuelCode(fuel) {
   return '1';
 }
 
-function buildFinnUrl(make, model, yearFrom, yearTo, vegData) {
+function buildFinnUrl(make, model, yearFrom, yearTo, vegData, noFuel = false) {
   const regClass = vegData.isVarebil ? '2' : '1';
-  const fuel = getFinnFuelCode(vegData.fuel);
   const cleanMake = make
     .replace(/\s*MOTORS\s*/i, '')
     .replace(/JAGUAR LAND ROVER LIMITED/i, 'Land Rover')
     .trim();
   const q = `${cleanMake} ${model}`;
-  return `https://www.finn.no/mobility/search/car?sales_form=1&registration_class=${regClass}&q=${encodeURIComponent(q)}&fuel=${fuel}&year_from=${yearFrom}&year_to=${yearTo}&sort=MILEAGE_ASC`;
+  const fuelParam = noFuel ? '' : `&fuel=${getFinnFuelCode(vegData.fuel)}`;
+  return `https://www.finn.no/mobility/search/car?sales_form=1&registration_class=${regClass}&q=${encodeURIComponent(q)}${fuelParam}&year_from=${yearFrom}&year_to=${yearTo}&sort=MILEAGE_ASC`;
 }
 
 async function scrapeFinnUrl(url, page) {
@@ -346,10 +346,18 @@ async function getFinnComps(bil, vegData, page) {
   const yFrom = yBase;
   const yTo = vegData.firstRegMonth >= 9 ? yBase + 1 : yBase;
 
+  // Steg 1: søk med fuel-filter
   const urlVariants = [
     buildFinnUrl(vegData.make, bil.model_series || '', yFrom,     yTo,     vegData),
     buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 1, yTo + 1, vegData),
     buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 2, yTo + 2, vegData),
+  ];
+
+  // Steg 2: hvis 0 treff på alle — prøv uten fuel-filter
+  const noFuelVariants = [
+    buildFinnUrl(vegData.make, bil.model_series || '', yFrom,     yTo,     vegData, true),
+    buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 1, yTo + 1, vegData, true),
+    buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 2, yTo + 2, vegData, true),
   ];
 
   const seen = new Set();
@@ -357,14 +365,18 @@ async function getFinnComps(bil, vegData, page) {
   let totalCount = 0;
   let finnUrl = urlVariants[0];
 
-  for (const url of urlVariants) {
-    const { comps, totalCount: tc } = await scrapeFinnUrl(url, page);
-    if (tc > totalCount) { totalCount = tc; finnUrl = url; }
-    for (const c of comps) {
-      const key = `${c.price}-${c.km}`;
-      if (!seen.has(key) && c.km <= 500000) { seen.add(key); allComps.push(c); }
+  for (const variants of [urlVariants, noFuelVariants]) {
+    for (const url of variants) {
+      const { comps, totalCount: tc } = await scrapeFinnUrl(url, page);
+      if (tc > totalCount) { totalCount = tc; finnUrl = url; }
+      for (const c of comps) {
+        const key = `${c.price}-${c.km}`;
+        if (!seen.has(key) && c.km <= 500000) { seen.add(key); allComps.push(c); }
+      }
+      if (allComps.length >= 10) break;
     }
-    if (allComps.length >= 10) break;
+    if (allComps.length > 0) break; // fant noe — ikke prøv no-fuel
+    log('Finn: 0 treff med fuel-filter — prover uten fuel');
   }
 
   // Km-filter
