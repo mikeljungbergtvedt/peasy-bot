@@ -408,6 +408,23 @@ const BRACKETS = [
 
 function getBracket(price) { return BRACKETS.find(b => price <= b.max); }
 
+// ── DYNAMIC xPct: Feedback loop Pulse → peasy-brackets.json → bot ────────────
+// Pulse beregner recX per bracket fra faktiske salgsdata og skriver til GH Pages
+// Boten henter disse verdiene ved hver run() og bruker dem i calcValuation()
+// Faller tilbake til hardkodede PDEC1-verdier hvis fetch feiler (driftsikkerhet)
+let _dynamicXPct = null;
+async function fetchDynamicXPct() {
+  try {
+    const res = await fetch('https://mikeljungbergtvedt.github.io/peasy-brackets.json?t=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    _dynamicXPct = await res.json();
+    console.log('  Dynamic xPct loaded:', JSON.stringify(_dynamicXPct));
+  } catch(e) {
+    console.log('  Dynamic xPct unavailable, using PDEC1 fallback:', e.message);
+    _dynamicXPct = null;
+  }
+}
+
 function calcValuation(lowestComp) {
   const raw  = formatNOK(lowestComp * 0.88);
   const bud  = (lowestComp - raw) >= 10000 ? raw : lowestComp - 10000;
@@ -442,7 +459,9 @@ function formatSingleResult(r) {
   msg += '\n';
   comps.sort((a,b) => a.price - b.price).slice(0,5).forEach((comp,i) => {
     const isAnker = r.anchor && comp.price === r.anchor.price && comp.km === r.anchor.km;
-    msg += (isAnker ? '> ' : '  ') + (i+1) + '.  ' + comp.price.toLocaleString('nb-NO') + ' kr  ' + comp.km.toLocaleString('nb-NO') + ' km  ' + (comp.year||'') + (isAnker ? '  <- anker' : '') + '\n';
+    // EC-06: Anker-linje vises i bold, resten plain
+    const line = '  '+(i+1)+'.  '+comp.price.toLocaleString('nb-NO')+' kr  '+comp.km.toLocaleString('nb-NO')+' km  '+(comp.year||'');
+    msg += (isAnker ? '<b>'+line+'  <-- ANKER</b>' : line)+'\n';
   });
   msg += '   Snitt: ' + fmtNOKstr(finnAvg) + '\n\n';
   if (r.anchor && r.anchor.aiReason) msg += '<b>AI KOMMENTAR</b>\n' + r.anchor.aiReason + '\n\n';
@@ -456,7 +475,8 @@ function formatSingleResult(r) {
   msg += '<b>HEFTELSER</b>\n   ' + r.heftelser + '\n';
   if (valuation.dMid < 10000) msg += '   NB: Lav okonomi - vurder manuelt\n';
   msg += '\n';
-  if (r.sdComment) msg += '<b>KOMMENTAR FRA SELGER</b>\n   ' + r.sdComment.substring(0,300) + '\n\n';
+  if (r.// EC-21/22: Alltid vis selgerkommentar-seksjon
+  sdComment) msg += 'KOMMENTAR FRA SELGER\n  ' + (r.sdComment ? r.sdComment.substring(0,300) : 'Ingen selgerkommentar') + '\n\n';
   msg += '<b>ERP</b>\n';
   const hasHeft = r.heftelser && r.heftelser.includes('registrert');
   if (r.finnListing)            msg += '   Ikke skrevet - bil annonsert pa Finn\n';
@@ -471,6 +491,9 @@ async function run(force) {
   const runTime = new Date();
   console.log('\n[' + runTime.toLocaleString('nb-NO') + '] Starting run...');
   if (!force && !shouldRun()) { console.log('Outside hours. Skipping.'); return; }
+  // Hent dynamisk xPct fra Pulse før kjøring
+  await fetchDynamicXPct();
+
   try { await checkTeslaPrices(); } catch(err) { console.error('Tesla check failed:', err.message); }
   let browser;
   const results = [];
