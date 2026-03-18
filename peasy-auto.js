@@ -1,157 +1,125 @@
+// ============================================================
+// peasy-auto.js — Peasy C2B Prisbot
+// Versjon: v19.03.a — komplett omskriving
+//
+// Kjernefunksjon:
+//   - Henter biler fra ERP (liste 2+3)
+//   - Søker Finn.no for sammenlignbare biler
+//   - AI (Claude Haiku) velger anker
+//   - Beregner D lav/høy og E (estimert bud)
+//   - Sender eval-kort til Telegram
+//   - Skriver alltid til ERP (PUT pris + POST kommentar)
+//
+// /finn kommando:
+//   - Bruker manuell Finn-URL som komp-pool
+//   - Identisk eval-kort og ERP-skriving
+//
+// Prisformel (PDEC1):
+//   T = max(anker × 0.88, anker − 10000)
+//   fee = T < 75k → 5900, T < 125k → 7900, ellers → 9900
+//   D mid = T − fee
+//   D lav = D mid × 0.95, D høy = D mid × 1.05
+//   E = D lav × xPct (fra peasy-brackets.json, fallback PDEC1)
+// ============================================================
+
 require('dotenv').config();
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-// Single instance ?????? kill previous if running
+// ── Enkelt-instans lås ──────────────────────────────────────
 const LOCK = '/tmp/peasy.lock';
 try {
-  const old = fs.existsSync(LOCK) && parseInt(fs.readFileSync(LOCK,'utf8'));
+  const old = fs.existsSync(LOCK) && parseInt(fs.readFileSync(LOCK, 'utf8'));
   if (old && old !== process.pid) { try { process.kill(old, 'SIGKILL'); } catch(e){} }
 } catch(e){}
 fs.writeFileSync(LOCK, String(process.pid));
 process.on('exit', () => { try { fs.unlinkSync(LOCK); } catch(e){} });
 
-
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+// ── Miljøvariabler ──────────────────────────────────────────
+const TELEGRAM_TOKEN   = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const VEGVESEN_API_KEY = process.env.VEGVESEN_API_KEY;
-const TESLA_CACHE_FILE = 'tesla-prices.json';
 
-const PAINT_NO = {
-  'WHITE': 'Perlemorshvit', 'BLACK': 'Enfargert svart', 'SILVER': 'Solv',
-  'BLUE': 'Dypbla metallic', 'RED': 'Rod multi-coat', 'GRAY': 'Middagsgr????',
-  'STEALTH_GREY': 'Stealth Grey', 'ULTRA_RED': 'Ultra Red', 'QUICKSILVER': 'Quicksilver',
-};
-
+// ── Kjøretid: 06-22 ────────────────────────────────────────
 function shouldRun() {
   const h = new Date().getHours();
   return h >= 6 && h < 22;
 }
 
-function loadJSON(file) {
-  if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
-  return {};
-}
+// ── Hjelpefunksjoner ────────────────────────────────────────
+function formatNOK(num) { return Math.round(num / 1000) * 1000; }
+function fmtNOKstr(num) { return formatNOK(num).toLocaleString('nb-NO') + ' kr'; }
+function loadJSON(file) { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8')); return {}; }
+function saveJSON(file, data) { fs.writeFileSync(file, JSON.stringify(data, null, 2)); }
 
-function saveJSON(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
-
-function formatNOK(num) {
-  return Math.round(num / 1000) * 1000;
-}
-
-function fmtNOKstr(num) {
-  return formatNOK(num).toLocaleString('nb-NO') + ' kr';
-}
-
+// ── Telegram ────────────────────────────────────────────────
 async function sendTelegram(message) {
   try {
     await fetch('https://api.telegram.org/bot' + TELEGRAM_TOKEN + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message, parse_mode: 'HTML', disable_web_page_preview: true }),
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text: message,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      }),
     });
-  } catch (err) { console.error('Telegram error:', err.message); }
+  } catch(err) { console.error('Telegram feil:', err.message); }
 }
 
-function getTeslaRange(car) {
-  const specs = car.OptionCodeData || [];
-  const r = specs.find(s => s.group === 'SPECS_RANGE');
-  return r ? r.value + ' km' : '';
-}
-
-async function fetchTeslaInventory() {
-  const query = encodeURIComponent(JSON.stringify({
-    query: { model: 'm3', condition: 'new', options: {}, arrangeby: 'Price', order: 'asc', market: 'NO', language: 'no', super_region: 'europe', zip: '0001', range: 0, region: 'NO' },
-    offset: 0, count: 50, outsideOffset: 0, outsideSearch: false
-  }));
-  const res = await fetch('https://www.tesla.com/inventory/api/v4/inventory-results?query=' + query, {
-    headers: { 'User-Agent': 'Tesla/4.30.6 CFNetwork/1410.0.3 Darwin/22.6.0', 'X-Tesla-User-Agent': 'TeslaApp/4.30.6', 'Accept': 'application/json', 'Accept-Language': 'nb-NO' }
-  });
-  if (!res.ok) throw new Error('Tesla API ' + res.status);
-  const data = await res.json();
-  return data.results || [];
-}
-
-async function checkTeslaPrices() {
-  console.log('Checking Tesla Model 3 inventory...');
-  const results = await fetchTeslaInventory();
-  console.log('  Found ' + results.length + ' cars');
-  const cache = loadJSON(TESLA_CACHE_FILE);
-  const newCache = {};
-  const alerts = [];
-  for (const car of results) {
-    const vin = car.VIN;
-    if (!vin) continue;
-    const basePrice = Math.round(car.CashDetails?.cash?.inventoryPriceWithoutDiscounts || 0);
-    const discount = Math.round(car.CashDetails?.cash?.inventoryDiscountWithTax || 0);
-    const finalPrice = basePrice - discount;
-    const trimName = car.TrimName || car.TRIM?.[0] || 'Model 3';
-    const color = PAINT_NO[car.PAINT?.[0]] || car.PAINT?.[0] || 'Ukjent';
-    const range = getTeslaRange(car);
-    const inTransit = car.InTransit ? 'I transit' : 'Pa lager';
-    newCache[vin] = { finalPrice, trimName, color, discount };
-    if (cache[vin]) {
-      if (finalPrice < cache[vin].finalPrice) {
-        alerts.push({ trimName, color, range, inTransit, oldPrice: cache[vin].finalPrice, finalPrice, drop: cache[vin].finalPrice - finalPrice, isNew: false });
-      }
-    } else if (discount > 0) {
-      alerts.push({ trimName, color, range, inTransit, finalPrice, drop: discount, isNew: true });
-    }
-  }
-  saveJSON(TESLA_CACHE_FILE, newCache);
-  if (alerts.length > 0) {
-    let msg = 'TESLA MODEL 3 PRISREDUKSJON\n\n';
-    for (const a of alerts) {
-      msg += 'Model 3 ' + a.trimName + ' | ' + a.color + ' | ' + a.range + ' | ' + a.inTransit + '\n';
-      if (!a.isNew) { msg += 'Senket med ' + fmtNOKstr(a.drop) + ' | F????r: ' + fmtNOKstr(a.oldPrice) + '\n'; }
-      msg += 'Pris n????: ' + fmtNOKstr(a.finalPrice) + '\n\n';
-    }
-    await sendTelegram(msg);
-  } else {
-    console.log('  Ingen Tesla prisendringer');
-  }
-}
-
+// ── ERP Auth ────────────────────────────────────────────────
 let _erpToken = null;
 let _erpTokenExpiry = null;
-
 async function getERPToken() {
   if (_erpToken && _erpTokenExpiry && new Date() < _erpTokenExpiry) return _erpToken;
-  console.log('Logging in to ERP...');
+  console.log('Logger inn i ERP...');
   const res = await fetch('https://api.biladministrasjon.no/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: process.env.ERP_USER, password: process.env.ERP_PASS })
   });
   const data = await res.json();
-  if (!data.success) throw new Error('ERP login failed');
+  if (!data.success) throw new Error('ERP login feilet');
   _erpToken = data.data.token.token;
   _erpTokenExpiry = new Date(data.data.token.expires_at);
   return _erpToken;
 }
 
+// ── ERP: Hent selgerkommentar ───────────────────────────────
 async function getERPCarComment(erpId, token) {
   try {
-    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/' + erpId, { headers: { 'Authorization': 'Bearer ' + token } });
+    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/' + erpId, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
     const data = await res.json();
     return data.data?.car?.self_declaration?.comment || null;
   } catch(e) { return null; }
 }
 
-async function writeARValueToERP(erpId, priceMin, priceMax, heftelser, token) {
+// ── ERP: Skriv AR-verdi (PUT) — alltid, ingen unntak ───────
+// auction_price_type_id: 1 = Regular (D lav > 35k), 2 = Lower (D lav <= 35k)
+async function writeARValueToERP(erpId, dLow, dHigh, heftelser, token) {
   try {
     const today = new Date().toISOString().split('T')[0];
     const hasDebt = heftelser && heftelser.includes('registrert');
+    const auctionType = dLow <= 35000 ? 2 : 1;
+
     const payload = {
-      price_final_min: formatNOK(priceMin),
-      price_final_max: formatNOK(priceMax),
-      encumbrance: { is_checked: true, has_debt: hasDebt, comment: heftelser || 'Ingen heftelser', date: today },
-      owners_check_date: today,
+      price_final_min:        formatNOK(dLow),
+      price_final_max:        formatNOK(dHigh),
+      auction_price_type_id:  auctionType,
+      encumbrance: {
+        is_checked: true,
+        has_debt:   hasDebt,
+        comment:    heftelser || 'Ingen heftelser',
+        date:       today
+      },
+      owners_check_date:    today,
       owners_check_comment: null,
-      owners_is_checked: true,
+      owners_is_checked:    true,
     };
+
     const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/' + erpId, {
       method: 'PUT',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
@@ -159,92 +127,123 @@ async function writeARValueToERP(erpId, priceMin, priceMax, heftelser, token) {
     });
     const data = await res.json();
     if (data.success) {
-      console.log('  ERP updated: ' + formatNOK(priceMin).toLocaleString('nb-NO') + ' - ' + formatNOK(priceMax).toLocaleString('nb-NO') + ' kr');
+      console.log('  ERP PUT OK: ' + formatNOK(dLow).toLocaleString('nb-NO') + ' - ' + formatNOK(dHigh).toLocaleString('nb-NO') + ' kr | auksjon type ' + auctionType);
       return true;
     } else {
-      console.error('  ERP write failed:', JSON.stringify(data));
+      console.error('  ERP PUT feilet:', JSON.stringify(data));
       return false;
     }
-  } catch(e) { console.error('  ERP write error:', e.message); return false; }
+  } catch(e) {
+    console.error('  ERP PUT feil:', e.message);
+    return false;
+  }
 }
 
+// ── ERP: Post eval-kort som kommentar (POST) — alltid ───────
+async function postERPComment(erpId, evalText, token) {
+  try {
+    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/' + erpId + '/comments', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ comment: evalText })
+    });
+    const data = await res.json();
+    if (data.success) {
+      console.log('  ERP kommentar POST OK');
+      return true;
+    } else {
+      console.error('  ERP kommentar POST feilet:', JSON.stringify(data));
+      return false;
+    }
+  } catch(e) {
+    console.error('  ERP kommentar feil:', e.message);
+    return false;
+  }
+}
+
+// ── ERP: Hent biler i kø (liste 2+3) ───────────────────────
 async function fetchPendingCars() {
-  console.log('Fetching pending cars from ERP...');
+  console.log('Henter biler fra ERP...');
   const token = await getERPToken();
   const cars = [];
   for (const endpoint of ['estimating_ar_final', 'estimating_ar_temp']) {
-    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/processing/' + endpoint + '?per_page=50', { headers: { 'Authorization': 'Bearer ' + token } });
-    if (!res.ok) { console.error('ERP ' + endpoint + ' failed: ' + res.status); continue; }
+    const res = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/processing/' + endpoint + '?per_page=100', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) { console.error('ERP ' + endpoint + ' feilet: ' + res.status); continue; }
     const data = await res.json();
     const list = data.data?.data?.data || [];
     for (const c of list) {
       if (!c.registration_number) continue;
-      cars.push({ erpId: c.id, regNr: c.registration_number, make: c.manufacturer || '', model: c.model_series || '', year: c.model_year || 0, km: c.mileage || 0, hasSdComment: c.has_sd_comment === 1, source: c.source || '' });
+      cars.push({
+        erpId:        c.id,
+        regNr:        c.registration_number,
+        make:         c.manufacturer || '',
+        model:        c.model_series || '',
+        year:         c.model_year || 0,
+        km:           c.mileage || 0,
+        hasSdComment: c.has_sd_comment === 1,
+        source:       c.source || ''
+      });
     }
   }
   const seen = new Set();
   const unique = cars.filter(c => { if (seen.has(c.regNr)) return false; seen.add(c.regNr); return true; });
-  console.log('  Found ' + unique.length + ' unprocessed car(s)');
+  console.log('  Fant ' + unique.length + ' bil(er)');
   return unique;
 }
 
+// ── Vegvesen ────────────────────────────────────────────────
 async function getVegvesenData(regNr) {
-  const res = await fetch('https://akfell-datautlevering.atlas.vegvesen.no/enkeltoppslag/kjoretoydata?kjennemerke=' + regNr.replace(/\s/g, ''), { headers: { 'Accept': 'application/json', 'SVV-Authorization': VEGVESEN_API_KEY } });
+  const res = await fetch('https://akfell-datautlevering.atlas.vegvesen.no/enkeltoppslag/kjoretoydata?kjennemerke=' + regNr.replace(/\s/g, ''), {
+    headers: { 'Accept': 'application/json', 'SVV-Authorization': VEGVESEN_API_KEY }
+  });
   if (!res.ok) throw new Error('Vegvesen ' + res.status);
   const data = await res.json();
   const k = data.kjoretoydataListe?.[0];
-  if (!k) throw new Error('No vegvesen data');
-  const td = k.godkjenning?.tekniskGodkjenning?.tekniskeData;
-  const motor = td?.motorOgDrivverk?.motor?.[0];
-  const drivstoff = motor?.drivstoff?.[0];
-  const miljo = td?.miljodata?.miljoOgdrivstoffGruppe?.[0];
-  const utslipp = miljo?.forbrukOgUtslipp?.[0];
-  const aksler = td?.akslinger?.akselGruppe || [];
+  if (!k) throw new Error('Ingen Vegvesen-data');
+  const td       = k.godkjenning?.tekniskGodkjenning?.tekniskeData;
+  const motor    = td?.motorOgDrivverk?.motor?.[0];
+  const drivstoff= motor?.drivstoff?.[0];
+  const miljo    = td?.miljodata?.miljoOgdrivstoffGruppe?.[0];
+  const utslipp  = miljo?.forbrukOgUtslipp?.[0];
+  const aksler   = td?.akslinger?.akselGruppe || [];
   const drivAksler = aksler.filter(g => g.akselListe?.aksel?.some(a => a.drivAksel)).length;
   const generelt = k.godkjenning?.tekniskGodkjenning?.tekniskeData?.generelt;
+
+  // Hent førstegangsregistrering for årsregel
+  const firstRegStr = k.godkjenning?.forstegangsGodkjenning?.forstegangRegistrertDato || '';
+  const firstRegMonth = firstRegStr ? parseInt(firstRegStr.split('-')[1] || '0') : 0;
+
   return {
-    make: generelt?.merke?.[0]?.merke || '',
-    model: generelt?.handelsbetegnelse?.[0] || '',
-    seats: td?.persontall?.sitteplasserTotalt || null,
-    isVarebil: k?.godkjenning?.tekniskGodkjenning?.kjoretoyklassifisering?.tekniskKode?.kodeBeskrivelse?.toLowerCase().includes('varebil') || false,
-    fuel: drivstoff?.drivstoffKode?.kodeBeskrivelse || 'Ukjent',
-    gearbox: td?.motorOgDrivverk?.girkassetype?.kodeBeskrivelse || 'Ukjent',
-    kw: drivstoff?.maksNettoEffekt || drivstoff?.maksEffektPrTime || 0,
-    hybrid: td?.motorOgDrivverk?.hybridKategori?.kodeVerdi || 'INGEN',
-    drive: drivAksler >= 2 ? '4WD' : '2WD',
-    range: utslipp?.wltpKjoretoyspesifikk?.rekkeviddeKmBlandetkjoring || null,
-    color: td?.karosseriOgLasteplan?.rFarge?.[0]?.kodeNavn || 'Ukjent',
-    bodyType: td?.karosseriOgLasteplan?.karosseritype?.kodeVerdi || '',
+    make:           generelt?.merke?.[0]?.merke || '',
+    model:          generelt?.handelsbetegnelse?.[0] || '',
+    isVarebil:      k?.godkjenning?.tekniskGodkjenning?.kjoretoyklassifisering?.tekniskKode?.kodeBeskrivelse?.toLowerCase().includes('varebil') || false,
+    fuel:           drivstoff?.drivstoffKode?.kodeBeskrivelse || 'Ukjent',
+    gearbox:        td?.motorOgDrivverk?.girkassetype?.kodeBeskrivelse || 'Ukjent',
+    kw:             drivstoff?.maksNettoEffekt || drivstoff?.maksEffektPrTime || 0,
+    drive:          drivAksler >= 2 ? '4WD' : '2WD',
+    range:          utslipp?.wltpKjoretoyspesifikk?.rekkeviddeKmBlandetkjoring || null,
+    bodyType:       td?.karosseriOgLasteplan?.karosseritype?.kodeVerdi || '',
+    firstRegMonth,
   };
 }
 
+// ── Heftelser (Brreg) ───────────────────────────────────────
 async function checkHeftelser(regNr, page) {
   try {
-    await page.goto('https://rettsstiftelser.brreg.no/nb/oppslag/motorvogn/' + regNr.replace(/\s/g, ''), { waitUntil: 'networkidle', timeout: 15000 });
+    await page.goto('https://rettsstiftelser.brreg.no/nb/oppslag/motorvogn/' + regNr.replace(/\s/g, ''), {
+      waitUntil: 'networkidle', timeout: 15000
+    });
     await page.waitForTimeout(1500);
     const text = await page.evaluate(() => document.body.innerText);
-    if (text.includes('ingen oppforinger') || text.includes('Ingen oppforinger') || text.includes('ingen oppf????ringer') || text.includes('Ingen oppf????ringer')) return 'Ingen heftelser';
+    if (text.toLowerCase().includes('ingen oppf')) return 'Ingen heftelser';
     if (text.includes('heftelse') || text.includes('pant') || text.includes('registrert')) return 'Heftelser registrert - sjekk manuelt';
     return 'Ingen heftelser';
   } catch(e) { return 'Kunne ikke sjekke heftelser'; }
 }
 
-// ?????????????????? FINN URL HELPERS ????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
-// body_type: 1=SUV 2=Stasjonsvogn 3=Sedan 4=Coupe 5=Cabriolet 7=Varebil
-// wheel_drive: 1=2WD 2=4WD | fuel: 1=Bensin 2=Diesel 3=Hybrid 4=Elektrisk
-// transmission: 1=Manuell 2=Automat
-
-function getFinnBodyType(specs) {
-  if (specs.isVarebil) return '7';
-  const k = specs.bodyType || '';
-  if (k === 'AA') return '3'; // Sedan
-  if (k === 'AB') return '2'; // Stasjonsvogn/Touring
-  if (k === 'AC') return '5'; // Cabriolet
-  if (k === 'AF') return '4'; // Coupe
-  if (['BA','BB','BC'].includes(k)) return '1'; // SUV/Crossover
-  return '';
-}
-
+// ── Finn-URL bygger ─────────────────────────────────────────
 function getFinnFuel(specs) {
   const f = specs.fuel.toLowerCase();
   if (f.includes('elektr')) return '4';
@@ -253,316 +252,12 @@ function getFinnFuel(specs) {
   return '1';
 }
 
-function getFinnDrive(specs) { return specs.drive === '4WD' ? '2' : '1'; }
-function getFinnTrans(specs) { return specs.gearbox.toLowerCase().includes('automat') ? '2' : '1'; }
-
-function buildFinnUrl(q, yFrom, yTo, kmFrom, kmTo, fuel, trans, drive, bodyType) {
-  let url = 'https://www.finn.no/mobility/search/car?sales_form=1&sort=PRICE_ASC&registration_class=1';
-  url += '&q=' + encodeURIComponent(q);
-  url += '&year_from=' + yFrom + '&year_to=' + yTo;
-  if (kmFrom > 0) url += '&mileage_from=' + kmFrom;
-  if (kmTo   > 0) url += '&mileage_to='   + kmTo;
-  if (fuel)       url += '&fuel='          + fuel;
-  if (trans)      url += '&transmission='  + trans;
-  if (drive)      url += '&wheel_drive='   + drive;
-  if (bodyType)   url += '&body_type='     + bodyType;
-  return url;
-}
-
-async function scrapeFinn(url, targetKm, page) {
-  console.log('  Finn: ' + url);
-  await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-  await page.waitForTimeout(2000);
-  const pageTotal = await page.evaluate(() => {
-    const m = document.body.innerText.match(/(\d[\d\s]+)\s*treff/);
-    return m ? parseInt(m[1].replace(/\s/g, '')) : 0;
-  });
-  const comps = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('article')).slice(0, 30).map(a => {
-      const text  = a.innerText || '';
-      const price = parseInt((text.match(/(\d[\d\s]+)\s*kr/) || [])[1]?.replace(/\s/g, '')) || 0;
-      const kmM   = text.match(/\b(20\d{2}|19\d{2})\b.*?([\d\s]+)\s*km[^\w]/);
-      const km    = kmM ? parseInt(kmM[2].replace(/\s/g, '')) : 0;
-      const year  = parseInt((text.match(/\b(19\d{2}|20\d{2})\b/) || [])[1]) || 0;
-      const hkM   = text.match(/(\d{2,3})\s*hk/i);
-      const hk    = hkM ? parseInt(hkM[1]) : null;
-      return { price, km, year, hk, text };
-    }).filter(c => {
-      const cy = new Date().getFullYear();
-      return c.price >= 20000 && c.price <= 2000000 && (c.year === 0 || (c.year >= 1990 && c.year <= cy));
-    });
-  });
-  const seen = new Set();
-  const unique = comps.filter(c => {
-    const key = c.price + '-' + c.km;
-    if (seen.has(key)) return false;
-    seen.add(key); return true;
-  });
-  unique._total = pageTotal || unique.length;
-  console.log('     ' + unique._total + ' treff (scraped ' + unique.length + ')');
-  return unique;
-}
-
-function qaCheckComps(car, specs, comps, valuation) {
-  if (comps.length < 2) return { approved: false, reason: 'For f???? Finn-treff (' + comps.length + ')' };
-  if (!valuation || !valuation.dLow) return { approved: false, reason: 'Valuation mangler' };
-  if (valuation.tEstimate < 10000) return { approved: false, reason: 'T-estimat under 10 000 kr ?????? vurder manuelt' };
-  return { approved: true, reason: 'OK' };
-}
-
-async function searchFinnComps(car, specs, page) {
-  const { make, model, year, km } = car;
-  const cleanMake = make.replace(/\s*MOTORS\s*/i, '').replace(/JAGUAR LAND ROVER LIMITED/i, 'Land Rover').trim();
-  const q        = cleanMake + ' ' + model;
-  const regClass = specs.isVarebil ? '2' : '1';
-  const base     = 'https://www.finn.no/mobility/search/car?sales_form=1&registration_class=' + regClass + '&q=' + encodeURIComponent(q) + '&year_from=' + year + '&year_to=' + year;
-
-  // Scrape both km-ascending and km-descending to get cars near our mileage
-  // Then fall back to ????1 year if too few results
-  const searches = [
-    base + '&sort=MILEAGE_ASC',
-    base + '&sort=MILEAGE_DESC',
-    'https://www.finn.no/mobility/search/car?sales_form=1&registration_class=' + regClass + '&q=' + encodeURIComponent(q) + '&year_from=' + (year-1) + '&year_to=' + (year+1) + '&sort=MILEAGE_ASC',
-    'https://www.finn.no/mobility/search/car?sales_form=1&registration_class=' + regClass + '&q=' + encodeURIComponent(q) + '&year_from=' + (year-1) + '&year_to=' + (year+1) + '&sort=MILEAGE_DESC',
-  ];
-
-  const seen  = new Set();
-  let comps   = [];
-  let finnUrl = base + '&sort=MILEAGE_ASC';
-  let totalCount = 0;
-
-  for (const url of searches) {
-    const raw = await scrapeFinn(url, km, page);
-    if (raw._total > totalCount) totalCount = raw._total;
-    for (const c of raw) {
-      const key = c.price + '-' + c.km;
-      if (!seen.has(key) && c.price >= 10000 && c.km <= 500000) {
-        seen.add(key);
-        comps.push(c);
-      }
-    }
-    if (comps.length >= 10) break;
-  }
-
-  // Sort by km proximity for Claude
-  comps.sort((a, b) => Math.abs(a.km - km) - Math.abs(b.km - km));
-  console.log('  Raw comps: ' + comps.length + ' (closest km: ' + (comps[0]?.km || 0).toLocaleString('nb-NO') + ')');
-  return { comps: comps, finnUrl: finnUrl, totalCount: totalCount };
-}
-
-// Claude picks the best anchor comp from raw Finn listings
-async function aiPickAnchor(car, specs, comps) {
-  if (comps.length === 0) return null;
-
-  // Pre-filter to cars within km band ?????? Claude only sees comparable cars
-  // ????30k first, widen to ????50k, then ????80k if needed
-  let pool = [];
-  for (const band of [30000, 50000, 80000, 150000]) {
-    pool = comps.filter(c => Math.abs(c.km - car.km) <= band);
-    if (pool.length >= 3) break;
-  }
-  if (pool.length === 0) pool = comps; // last resort
-
-  // Sort by price ASC within pool ?????? Claude picks cheapest comparable
-  pool.sort((a, b) => a.price - b.price);
-  const top5 = pool.slice(0, 5);
-
-  const listings = top5.map(function(c, i) {
-    return (i+1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + ' km | ' + c.year + ' | ' + (c.text ? c.text.substring(0, 80) : '');
-  }).join('\n');
-
-  const prompt = 'Du er en bruktbilekspert i Norge for Peasy (C2B auksjon).\n\n'
-    + 'Bilen som skal prises: ' + car.year + ' ' + car.make + ' ' + car.model + ', ' + car.km.toLocaleString('nb-NO') + ' km, ' + specs.fuel + ', ' + Math.round((specs.kw||0)*1.36) + ' hk\n\n'
-    + 'Sammenlignbare biler p???? Finn (lignende km, sortert billigst f????rst):\n'
-    + listings + '\n\n'
-    + 'Velg den billigste bilen som er et reelt alternativ til v????r bil. Ignorer ????penbart feil data.\n'
-    + 'Svar KUN med JSON: {"index": N, "price": PRIS, "reason": "en setning p???? norsk"}';
-
-  try {
-    const res  = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 150, messages: [{ role: 'user', content: prompt }] })
-    });
-    const data = await res.json();
-    const text = data.content && data.content[0] ? data.content[0].text : '';
-    const json = JSON.parse(text.replace(/```json|```/g, '').trim());
-    const anchor = top5[json.index - 1];
-    if (!anchor) return null;
-    console.log('  AI anchor: #' + json.index + ' ?????? ' + json.price.toLocaleString('nb-NO') + ' kr | ' + json.reason);
-    return { anchor: Object.assign({}, anchor, { aiReason: json.reason }), pool: top5 };
-  } catch(e) {
-    console.error('  AI anchor failed:', e.message);
-    const fallback = pool.slice().sort(function(a, b) { return a.price - b.price; })[0] || comps[0];
-    return { anchor: fallback, pool: top5 };
-  }
-}
-// ?????????????????? VALUATION ??????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
-// xPct = acceptance buffer ?????? update as auction data accumulates
-const BRACKETS = [
-  { max: 100000,   dealerMarginPct: 0,    minMargin: 10000, xPct: 0.03 },
-  { max: 250000,   dealerMarginPct: 0.12, minMargin: 10000, xPct: 0.01 },
-  { max: 400000,   dealerMarginPct: 0.12, minMargin: 10000, xPct: 0.01 },
-  { max: Infinity, dealerMarginPct: 0.12, minMargin: 10000, xPct: 0.00 },
-];
-
-function getBracket(price) { return BRACKETS.find(b => price <= b.max); }
-
-// ?????? DYNAMIC xPct: Feedback loop Pulse ??? peasy-brackets.json ??? bot ????????????????????????????????????
-// Pulse beregner recX per bracket fra faktiske salgsdata og skriver til GH Pages
-// Boten henter disse verdiene ved hver run() og bruker dem i calcValuation()
-// Faller tilbake til hardkodede PDEC1-verdier hvis fetch feiler (driftsikkerhet)
-let _dynamicXPct = null;
-async function fetchDynamicXPct() {
-  try {
-    const res = await fetch('https://mikeljungbergtvedt.github.io/peasy-brackets.json?t=' + Date.now());
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    _dynamicXPct = await res.json();
-    console.log('  Dynamic xPct loaded:', JSON.stringify(_dynamicXPct));
-  } catch(e) {
-    console.log('  Dynamic xPct unavailable, using PDEC1 fallback:', e.message);
-    _dynamicXPct = null;
-  }
-}
-
-function calcValuation(lowestComp) {
-  const raw  = formatNOK(lowestComp * 0.88);
-  const bud  = (lowestComp - raw) >= 10000 ? raw : lowestComp - 10000;
-  const fee  = bud >= 125000 ? 9900 : bud >= 75000 ? 7900 : 5900;
-  const dMid = bud - fee;
-  const dLow = formatNOK(dMid * 0.95);
-  const dHigh= formatNOK(dMid * 1.05);
-  // PDEC1: Estimert h????yeste bud (E) ?????? dynamic per bracket (Anbefalt X%)
-  const xPct = dMid <= 100000 ? 0.102 : dMid <= 250000 ? -0.089 : dMid <= 400000 ? -0.046 : -0.073;
-  const eBud = formatNOK(dLow * (1 + xPct));
-  return { dLow, dHigh, dMid, fee, sannsynligBud: bud, tEstimate: bud, sellerT: formatNOK(dMid), eBud, xPct };
-}
-
-function formatSingleResult(r) {
-  let msg = '';
-  if (r.status === 'error') { return '<b>' + r.regNr + '</b> ?????? ' + r.error + '\n\n'; }
-  const { car, specs, comps, finnUrl, valuation, finnAvg, lowestComp, qa } = r;
-  const source = (car.source || '').toLowerCase();
-  const title  = source === 'driveno' ? 'DRIVE BIL TIL ESTIMERING' : 'PEASY BIL TIL ESTIMERING';
-  const isEl   = specs.fuel.toLowerCase().includes('elektr');
-  const hkStr  = isEl ? (specs.range ? specs.range + ' km rekkevidde' : specs.kw + ' kW') : Math.round((specs.kw||0)*1.36) + 'hk';
-  msg += '<b>' + title + '</b>\n';
-  msg += r.regNr + '  |  ' + car.make + ' ' + car.model + ' ' + car.year + '  |  ' + car.km.toLocaleString('nb-NO') + ' km  |  ' + specs.fuel + '  |  ' + specs.gearbox + '  |  ' + specs.drive + '  |  ' + hkStr + '\n\n';
-  msg += '<b>FINN-SOK</b>  ' + specs.fuel + '  |  ' + car.year + '  |  ' + (r.totalCount || comps.length) + ' treff  |  <a href="' + finnUrl + '">Apne sok</a>\n';
-  if (r.finnListing) {
-    const gap = r.finnListing.price - r.lowestComp;
-    const gapStr = gap >= 0 ? '+' + Math.round(gap/1000) + 'k over anker' : Math.abs(Math.round(gap/1000)) + 'k under anker';
-    msg += '   Eigen annonse: <a href="https://www.finn.no/mobility/search/car?q=' + car.regNr + '">' + r.finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ')</a>\n';
-  } else {
-    msg += '   Eigen annonse: Ikke funnet\n';
-  }
-  msg += '\n';
-  comps.sort((a,b) => a.price - b.price).slice(0,5).forEach((comp,i) => {
-    const isAnker = r.anchor && comp.price === r.anchor.price && comp.km === r.anchor.km;
-    // EC-06: Anker-linje vises i bold, resten plain
-    const line = '  '+(i+1)+'.  '+comp.price.toLocaleString('nb-NO')+' kr  '+comp.km.toLocaleString('nb-NO')+' km  '+(comp.year||'');
-    msg += (isAnker ? '<b>'+line+'  <-- ANKER</b>' : line)+'\n';
-  });
-  msg += '   Snitt: ' + fmtNOKstr(finnAvg) + '\n\n';
-  if (r.anchor && r.anchor.aiReason) msg += '<b>AI KOMMENTAR</b>\n' + r.anchor.aiReason + '\n\n';
-  msg += '<b>KALKYLE</b>\n';
-  msg += '   Anker:          ' + r.lowestComp.toLocaleString('nb-NO') + ' kr\n';
-  msg += '   x 0.88:         ' + valuation.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
-  msg += '   Peasy fee (U): -' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
-  msg += '   D mid:          ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
-  msg += '<b>   Estimert:      ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n';
-  msg += '   Est. bud (E):  ~' + valuation.eBud.toLocaleString('nb-NO') + ' kr  (' + (valuation.xPct >= 0 ? '+' : '') + (valuation.xPct * 100).toFixed(1) + '%)\n\n';
-  msg += '<b>HEFTELSER</b>\n   ' + r.heftelser + '\n';
-  if (valuation.dMid < 10000) msg += '   NB: Lav okonomi - vurder manuelt\n';
-  msg += '\n';
-  msg += 'KOMMENTAR FRA SELGER\n  ' + (r.sdComment ? r.sdComment.substring(0,300) : 'Ingen selgerkommentar') + '\n\n';
-  msg += '<b>ERP</b>\n';
-  const hasHeft = r.heftelser && r.heftelser.includes('registrert');
-  if (r.finnListing)            msg += '   Ikke skrevet - bil annonsert pa Finn\n';
-  else if (hasHeft)             msg += '   Ikke skrevet - heftelser registrert\n';
-  else if (qa && !qa.approved) { msg += '   Ikke skrevet - manuell gjennomgang\n   QA: ' + qa.reason + '\n'; }
-  else { msg += '   Skrevet til ERP\n'; if (qa) msg += '   QA: ' + qa.reason + '\n'; }
-  return msg;
-}
-
-
-async function run(force) {
-  const runTime = new Date();
-  console.log('\n[' + runTime.toLocaleString('nb-NO') + '] Starting run...');
-  if (!force && !shouldRun()) { console.log('Outside hours. Skipping.'); return; }
-  // Hent dynamisk xPct fra Pulse f??r kj??ring
-  await fetchDynamicXPct();
-
-  try { await checkTeslaPrices(); } catch(err) { console.error('Tesla check failed:', err.message); }
-  let browser;
-  const results = [];
-  try {
-    const pendingCars = await fetchPendingCars();
-    if (pendingCars.length === 0) { console.log('No pending cars.'); return; }
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.setExtraHTTPHeaders({ 'Accept-Language': 'nb-NO,nb;q=0.9' });
-    for (const car of pendingCars) {
-      console.log('\n' + car.regNr + ' ?????? ' + car.make + ' ' + car.model + ' ' + car.year + ' ' + car.km + 'km');
-      try {
-        const specs = await getVegvesenData(car.regNr);
-        console.log('  ' + specs.fuel + ' | ' + specs.gearbox + ' | ' + specs.drive + ' | ' + specs.kw + 'kW | bodyType:' + specs.bodyType);
-        const heftelser = await checkHeftelser(car.regNr, page);
-        const finnListing = await checkFinnListing(car.regNr, page);
-        const { comps, finnUrl, totalCount } = await searchFinnComps(car, specs, page);
-        if (comps.length < 1) throw new Error('Ingen Finn-treff funnet');
-        // Remove own listing from comps before passing to AI
-        const sansOwn = finnListing ? comps.filter(c => !(Math.abs(c.price - finnListing.price) < 1000 && Math.abs(c.km - car.km) < 2000)) : comps;
-        const { anchor, pool } = await aiPickAnchor(car, specs, sansOwn);
-        if (!anchor) throw new Error('AI fant ingen sammenlignbar bil');
-        const lowestComp = anchor.price;
-        const finnAvg    = Math.round(pool.reduce((s, c) => s + c.price, 0) / pool.length);
-        const valuation  = calcValuation(lowestComp);
-        console.log('  D lav: ' + fmtNOKstr(valuation.dLow) + ' | D h????y: ' + fmtNOKstr(valuation.dHigh));
-        let sdComment = null;
-        if (car.hasSdComment && car.erpId) {
-          const erpToken = await getERPToken();
-          sdComment = await getERPCarComment(car.erpId, erpToken);
-        }
-        const qa = qaCheckComps(car, specs, pool, valuation);
-        console.log('  QA:', qa.approved ? 'GODKJENT' : 'FLAGGET', '-', qa.reason);
-        const hasHeftelser = heftelser && heftelser.includes('registrert');
-        if (car.erpId && !finnListing && !hasHeftelser && qa.approved) {
-          const erpToken = await getERPToken();
-          await writeARValueToERP(car.erpId, valuation.dLow, valuation.dHigh, heftelser, erpToken);
-        } else if (finnListing) {
-          console.log('  SKIP ERP: Car listed on Finn at ' + finnListing.price + ' kr');
-        } else if (hasHeftelser) {
-          console.log('  SKIP ERP: Heftelser registrert');
-        } else if (!qa.approved) {
-          console.log('  SKIP ERP: QA flagget - ' + qa.reason);
-        }
-        results.push({ status: 'ok', regNr: car.regNr, car, specs, comps: pool, anchor, finnUrl, totalCount, finnAvg, lowestComp, valuation, heftelser, sdComment, finnListing, qa });
-      } catch (err) {
-        console.error('  ERROR: ' + err.message);
-        results.push({ status: 'error', regNr: car.regNr, error: err.message });
-      }
-      await new Promise(r => setTimeout(r, 2000));
-    }
-  } catch (err) {
-    console.error('Fatal:', err.message);
-    await sendTelegram('peasy-auto feil: ' + err.message);
-  } finally { if (browser) await browser.close(); }
-  if (results.length > 0) {
-    const time = runTime.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
-    await sendTelegram('<b>PEASY-AUTO | ' + time + '</b>');
-    for (const r of results) {
-      await sendTelegram(formatSingleResult(r));
-    }
-    console.log('Telegram sent');
-  }
-  console.log('Done.');
-}
-
-
+// ── Finn: Sjekk om bilen selv er annonsert ──────────────────
 async function checkFinnListing(regNr, page) {
   try {
-    await page.goto('https://www.finn.no/mobility/search/car?q=' + regNr + '&registration_class=1&sales_form=1', { waitUntil: 'networkidle', timeout: 15000 });
+    await page.goto('https://www.finn.no/mobility/search/car?q=' + regNr + '&registration_class=1&sales_form=1', {
+      waitUntil: 'networkidle', timeout: 15000
+    });
     await page.waitForTimeout(1500);
     const result = await page.evaluate(() => {
       const a = document.querySelector('article');
@@ -576,6 +271,440 @@ async function checkFinnListing(regNr, page) {
   } catch(e) { return null; }
 }
 
+// ── Finn: Skrap komp-pool fra URL ───────────────────────────
+async function scrapeFinnUrl(url, page) {
+  console.log('  Finn: ' + url);
+  await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+  await page.waitForTimeout(2000);
+  const pageTotal = await page.evaluate(() => {
+    const m = document.body.innerText.match(/(\d[\d\s]+)\s*treff/);
+    return m ? parseInt(m[1].replace(/\s/g, '')) : 0;
+  });
+  const comps = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('article')).slice(0, 30).map(a => {
+      const text = a.innerText || '';
+      const price = parseInt((text.match(/(\d[\d\s]+)\s*kr/) || [])[1]?.replace(/\s/g, '')) || 0;
+      const kmM = text.match(/\b(20\d{2}|19\d{2})\b.*?([\d\s]+)\s*km[^\w]/);
+      const km = kmM ? parseInt(kmM[2].replace(/\s/g, '')) : 0;
+      const year = parseInt((text.match(/\b(19\d{2}|20\d{2})\b/) || [])[1]) || 0;
+      return { price, km, year, text };
+    }).filter(c => c.price >= 5000 && c.price <= 2000000);
+  });
+  const seen = new Set();
+  const unique = comps.filter(c => {
+    const key = c.price + '-' + c.km;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+  unique._total = pageTotal || unique.length;
+  console.log('  ' + unique._total + ' treff, scraped ' + unique.length);
+  return unique;
+}
+
+// ── Finn: Auto-søk med årsregel og km-filter ───────────────
+async function searchFinnComps(car, specs, page) {
+  const cleanMake = car.make.replace(/\s*MOTORS\s*/i, '').replace(/JAGUAR LAND ROVER LIMITED/i, 'Land Rover').trim();
+  const q = cleanMake + ' ' + car.model;
+  const regClass = specs.isVarebil ? '2' : '1';
+  const fuel = getFinnFuel(specs);
+
+  // Årsregel: registrert etter august → inkluder neste år
+  const yFrom = car.year;
+  const yTo   = specs.firstRegMonth >= 9 ? car.year + 1 : car.year;
+
+  const base = 'https://www.finn.no/mobility/search/car?sales_form=1&registration_class=' + regClass +
+    '&q=' + encodeURIComponent(q) + '&fuel=' + fuel +
+    '&year_from=' + yFrom + '&year_to=' + yTo;
+
+  const searches = [
+    base + '&sort=MILEAGE_ASC',
+    base + '&sort=MILEAGE_DESC',
+    'https://www.finn.no/mobility/search/car?sales_form=1&registration_class=' + regClass +
+      '&q=' + encodeURIComponent(q) + '&fuel=' + fuel +
+      '&year_from=' + (yFrom-1) + '&year_to=' + (yTo+1) + '&sort=MILEAGE_ASC',
+  ];
+
+  const seen = new Set();
+  let comps = [];
+  let totalCount = 0;
+  const finnUrl = base + '&sort=MILEAGE_ASC';
+
+  for (const url of searches) {
+    const raw = await scrapeFinnUrl(url, page);
+    if (raw._total > totalCount) totalCount = raw._total;
+    for (const c of raw) {
+      const key = c.price + '-' + c.km;
+      if (!seen.has(key) && c.price >= 5000 && c.km <= 500000) {
+        seen.add(key); comps.push(c);
+      }
+    }
+    if (comps.length >= 10) break;
+  }
+
+  // Km-filter: ±30k, utvid til ±50k, ±80k, ±150k hvis for få
+  let pool = comps;
+  for (const band of [30000, 50000, 80000, 150000]) {
+    const filtered = comps.filter(c => Math.abs(c.km - car.km) <= band);
+    if (filtered.length >= 3) { pool = filtered; break; }
+  }
+
+  pool.sort((a, b) => a.price - b.price);
+  console.log('  Pool: ' + pool.length + ' biler etter km-filter');
+  return { comps: pool, finnUrl, totalCount };
+}
+
+// ── AI: Velg anker (Claude Haiku) ──────────────────────────
+async function aiPickAnchor(car, specs, pool) {
+  if (pool.length === 0) return null;
+  const top = pool.slice(0, 5);
+  const listings = top.map((c, i) =>
+    (i+1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + ' km | ' + c.year +
+    (c.text ? ' | ' + c.text.substring(0, 80) : '')
+  ).join('\n');
+
+  const hk = Math.round((specs.kw || 0) * 1.36);
+  const prompt =
+    'Du er bruktbilekspert i Norge for Peasy (C2B auksjon).\n\n' +
+    'Bilen som prises: ' + car.year + ' ' + car.make + ' ' + car.model + ', ' +
+    car.km.toLocaleString('nb-NO') + ' km, ' + specs.fuel + ', ' + hk + ' hk\n\n' +
+    'Sammenlignbare biler (sortert billigst):\n' + listings + '\n\n' +
+    'Velg billigste reelle alternativ. Ignorer skadet, demo, feil variant.\n' +
+    'Svar KUN med JSON: {"index": N, "price": PRIS, "reason": "en setning pa norsk"}';
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 150, messages: [{ role: 'user', content: prompt }] })
+    });
+    const data = await res.json();
+    const text = data.content?.[0]?.text || '';
+    const json = JSON.parse(text.replace(/```json|```/g, '').trim());
+    const anchor = top[json.index - 1];
+    if (!anchor) throw new Error('Ugyldig index fra AI');
+    console.log('  AI anker: #' + json.index + ' - ' + anchor.price.toLocaleString('nb-NO') + ' kr | ' + json.reason);
+    return { anchor: { ...anchor, aiReason: json.reason }, pool: top };
+  } catch(e) {
+    console.error('  AI anker feilet:', e.message, '- bruker billigste');
+    const fallback = top[0];
+    return { anchor: { ...fallback, aiReason: 'Billigste i pool (AI fallback)' }, pool: top };
+  }
+}
+
+// ── Dynamisk xPct fra Pulse feedback loop ──────────────────
+// Pulse skriver peasy-brackets.json til GH Pages etter datahenting
+// Boten henter dette ved run() og bruker i E-beregning
+// Fallback til PDEC1-verdier hvis fetch feiler
+let _dynamicXPct = null;
+async function fetchDynamicXPct() {
+  try {
+    const res = await fetch('https://mikeljungbergtvedt.github.io/peasy-brackets.json?t=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    _dynamicXPct = await res.json();
+    console.log('  Dynamic xPct lastet:', JSON.stringify(_dynamicXPct));
+  } catch(e) {
+    console.log('  Dynamic xPct utilgjengelig, bruker PDEC1 fallback:', e.message);
+    _dynamicXPct = null;
+  }
+}
+
+// ── Prisberegning ───────────────────────────────────────────
+function calcValuation(anchorPrice) {
+  // T = anker × 0.88, minimum 10k margin
+  const raw88 = formatNOK(anchorPrice * 0.88);
+  const T     = (anchorPrice - raw88) >= 10000 ? raw88 : anchorPrice - 10000;
+  const minMarginUsed = T < raw88;
+
+  // Peasy-gebyr basert på T
+  const fee = T >= 125000 ? 9900 : T >= 75000 ? 7900 : 5900;
+
+  // D mid, D lav, D høy
+  const dMid  = T - fee;
+  const dLow  = formatNOK(dMid * 0.95);
+  const dHigh = formatNOK(dMid * 1.05);
+
+  // xPct: dynamisk fra Pulse, fallback til PDEC1
+  const pdec1 = dMid <= 100000 ? 0.102 : dMid <= 250000 ? -0.089 : dMid <= 400000 ? -0.046 : -0.073;
+  let xPct = pdec1;
+  if (_dynamicXPct) {
+    if (dMid <= 100000)      xPct = _dynamicXPct.lav     ?? pdec1;
+    else if (dMid <= 250000) xPct = _dynamicXPct.mid     ?? pdec1;
+    else if (dMid <= 400000) xPct = _dynamicXPct.hoy     ?? pdec1;
+    else                     xPct = _dynamicXPct.premium ?? pdec1;
+  }
+  const eBud = formatNOK(dLow * (1 + xPct));
+
+  return { T, raw88, minMarginUsed, fee, dMid, dLow, dHigh, xPct, eBud };
+}
+
+// ── Bygg eval-korttekst (plain text for Telegram HTML) ─────
+// Brukes til både Telegram og ERP-kommentar
+function buildEvalText(r) {
+  const { car, specs, pool, anchor, finnUrl, totalCount, finnAvg, anchorPrice, valuation, heftelser, sdComment, finnListing, source } = r;
+
+  const title = (source || '').toLowerCase() === 'driveno' ? 'DRIVE BIL TIL ESTIMERING' : 'PEASY BIL TIL ESTIMERING';
+  const isEl  = specs.fuel.toLowerCase().includes('elektr');
+  const hkStr = isEl ? (specs.range ? specs.range + ' km rekkevidde' : specs.kw + ' kW') : Math.round((specs.kw||0)*1.36) + ' hk';
+
+  let msg = '';
+
+  // ── Tittel og bilinfo ──
+  msg += title + '\n';
+  msg += car.regNr + ' | ' + car.make + ' ' + car.model + ' ' + car.year + ' | ' + car.km.toLocaleString('nb-NO') + ' km | ' + specs.fuel + ' | ' + specs.gearbox + ' | ' + specs.drive + ' | ' + hkStr + '\n\n';
+
+  // ── FINN-SOK ──
+  msg += 'FINN-SOK ' + specs.fuel + ' | ' + car.year + ' | ' + totalCount + ' treff\n';
+
+  // ── Finn-annonse (egen bil) ──
+  if (finnListing) {
+    const gap = finnListing.price - anchorPrice;
+    const gapStr = gap >= 0 ? '+' + Math.round(gap/1000) + 'k over anker' : Math.abs(Math.round(gap/1000)) + 'k under anker';
+    msg += 'Finn-annonse: ' + finnListing.price.toLocaleString('nb-NO') + ' kr (' + gapStr + ')\n';
+  } else {
+    msg += 'Finn-annonse: Ikke funnet\n';
+  }
+  msg += '\n';
+
+  // ── Komp-liste (1-5), anker i bold ──
+  pool.slice(0, 5).forEach((comp, i) => {
+    const isAnker = anchor && comp.price === anchor.price && comp.km === anchor.km;
+    const line = '  ' + (i+1) + '. ' + comp.price.toLocaleString('nb-NO') + ' kr  ' + comp.km.toLocaleString('nb-NO') + ' km  ' + (comp.year||'');
+    if (isAnker) msg += '<b>' + line + '  <-- ANKER</b>\n';
+    else msg += line + '\n';
+  });
+  msg += '  Snitt: ' + fmtNOKstr(finnAvg) + '\n\n';
+
+  // ── AI-kommentar ──
+  msg += 'AI KOMMENTAR\n';
+  msg += '  ' + (anchor?.aiReason || 'Ingen AI-begrunnelse') + '\n\n';
+
+  // ── Kalkyle ──
+  msg += 'KALKYLE\n';
+  msg += '  Anker:          ' + anchorPrice.toLocaleString('nb-NO') + ' kr\n';
+  msg += '  x 0.88:         ' + valuation.raw88.toLocaleString('nb-NO') + ' kr\n';
+  if (valuation.minMarginUsed) {
+    msg += '  (min.margin):   ' + valuation.T.toLocaleString('nb-NO') + ' kr  <- min 10k margin\n';
+  }
+  msg += '  Peasy fee (U): -' + valuation.fee.toLocaleString('nb-NO') + ' kr\n';
+  msg += '  D mid:          ' + valuation.dMid.toLocaleString('nb-NO') + ' kr\n';
+  msg += '  Estimert:       ' + valuation.dLow.toLocaleString('nb-NO') + ' - ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr\n';
+  msg += '  Est. bud (E):  ~' + valuation.eBud.toLocaleString('nb-NO') + ' kr (' + (valuation.xPct >= 0 ? '+' : '') + (valuation.xPct * 100).toFixed(1) + '%)\n\n';
+
+  // ── Heftelser ──
+  msg += 'HEFTELSER\n';
+  msg += '  ' + heftelser + '\n\n';
+
+  // ── Selgerkommentar — alltid synlig ──
+  msg += 'KOMMENTAR FRA SELGER\n';
+  msg += '  ' + (sdComment || 'Ingen selgerkommentar') + '\n\n';
+
+  // ── ERP-status ──
+  msg += 'ERP\n';
+  const auctionType = valuation.dLow <= 35000 ? '2 (Lower price)' : '1 (Regular)';
+  msg += '  Skrevet: D lav ' + valuation.dLow.toLocaleString('nb-NO') + ' - D hoy ' + valuation.dHigh.toLocaleString('nb-NO') + ' kr | Auksjon type ' + auctionType + '\n';
+
+  return msg;
+}
+
+// ── Telegram-versjon med bold på tittel og estimert ─────────
+function buildTelegramText(r) {
+  let msg = buildEvalText(r);
+  // Wrap title i bold for Telegram
+  const title = (r.source || '').toLowerCase() === 'driveno' ? 'DRIVE BIL TIL ESTIMERING' : 'PEASY BIL TIL ESTIMERING';
+  msg = msg.replace(title, '<b>' + title + '</b>');
+  // Wrap estimert-linje i bold
+  msg = msg.replace('  Estimert:       ', '<b>  Estimert:       ');
+  msg = msg.replace(r.valuation.dHigh.toLocaleString('nb-NO') + ' kr\n', r.valuation.dHigh.toLocaleString('nb-NO') + ' kr</b>\n');
+  // Finn-lenke
+  msg = msg.replace('FINN-SOK ' + r.specs.fuel + ' | ' + r.car.year + ' | ' + r.totalCount + ' treff\n',
+    'FINN-SOK ' + r.specs.fuel + ' | ' + r.car.year + ' | ' + r.totalCount + ' treff | <a href="' + r.finnUrl + '">Apne sok</a>\n');
+  return msg;
+}
+
+// ── Prosesser én bil ────────────────────────────────────────
+async function processCar(car, page, finnUrlOverride) {
+  console.log('\n' + car.regNr + ' - ' + car.make + ' ' + car.model + ' ' + car.year + ' ' + car.km + 'km' + (finnUrlOverride ? ' [/finn manuell]' : ''));
+
+  const specs     = await getVegvesenData(car.regNr);
+  console.log('  ' + specs.fuel + ' | ' + specs.gearbox + ' | ' + specs.drive + ' | ' + specs.kw + 'kW');
+
+  const heftelser = await checkHeftelser(car.regNr, page);
+  const finnListing = await checkFinnListing(car.regNr, page);
+
+  // Komp-pool: manuell URL (/finn) eller auto-søk
+  let pool, finnUrl, totalCount;
+  if (finnUrlOverride) {
+    const raw = await scrapeFinnUrl(finnUrlOverride, page);
+    // Km-filter
+    let filtered = raw;
+    for (const band of [30000, 50000, 80000, 150000]) {
+      const f = raw.filter(c => Math.abs(c.km - car.km) <= band);
+      if (f.length >= 3) { filtered = f; break; }
+    }
+    filtered.sort((a, b) => a.price - b.price);
+    pool = filtered;
+    finnUrl = finnUrlOverride;
+    totalCount = raw._total || raw.length;
+  } else {
+    const result = await searchFinnComps(car, specs, page);
+    pool = result.comps;
+    finnUrl = result.finnUrl;
+    totalCount = result.totalCount;
+  }
+
+  if (pool.length < 1) throw new Error('Ingen Finn-treff funnet');
+
+  // Fjern egen bil fra pool
+  const sansOwn = finnListing
+    ? pool.filter(c => !(Math.abs(c.price - finnListing.price) < 1000 && Math.abs(c.km - car.km) < 2000))
+    : pool;
+
+  // AI velger anker
+  const { anchor, pool: top5 } = await aiPickAnchor(car, specs, sansOwn);
+  if (!anchor) throw new Error('AI fant ingen sammenlignbar bil');
+
+  // Ankerprinsipp: hvis Finn-annonse < billigste komp → bruk Finn-pris som anker
+  let anchorPrice = anchor.price;
+  const lowestInPool = Math.min(...sansOwn.map(c => c.price));
+  if (finnListing && finnListing.price < lowestInPool) {
+    anchorPrice = finnListing.price;
+    console.log('  Finn-annonse < pool anker — bruker Finn-pris som anker: ' + anchorPrice.toLocaleString('nb-NO') + ' kr');
+  }
+
+  const finnAvg   = Math.round(top5.reduce((s, c) => s + c.price, 0) / top5.length);
+  const valuation = calcValuation(anchorPrice);
+  console.log('  D lav: ' + fmtNOKstr(valuation.dLow) + ' | D hoy: ' + fmtNOKstr(valuation.dHigh) + ' | E: ' + fmtNOKstr(valuation.eBud));
+
+  // Selgerkommentar fra ERP
+  let sdComment = null;
+  if (car.hasSdComment && car.erpId) {
+    const token = await getERPToken();
+    sdComment = await getERPCarComment(car.erpId, token);
+  }
+
+  const result = {
+    car, specs, pool: top5, anchor, finnUrl, totalCount, finnAvg,
+    anchorPrice, valuation, heftelser, sdComment, finnListing,
+    source: car.source || ''
+  };
+
+  // ── ERP: Skriv alltid ───────────────────────────────────
+  if (car.erpId) {
+    const token = await getERPToken();
+    // PUT: D lav/høy + auksjon type + heftelser + eiere
+    await writeARValueToERP(car.erpId, valuation.dLow, valuation.dHigh, heftelser, token);
+    // POST: eval-kort som kommentar (plain text uten HTML-tags)
+    const evalPlain = buildEvalText(result).replace(/<[^>]+>/g, '');
+    await postERPComment(car.erpId, evalPlain, token);
+  }
+
+  return result;
+}
+
+// ── Hovedkjøring ────────────────────────────────────────────
+async function run(force) {
+  const runTime = new Date();
+  console.log('\n[' + runTime.toLocaleString('nb-NO') + '] Starter kjoring...');
+  if (!force && !shouldRun()) { console.log('Utenfor kjøretid. Hopper over.'); return; }
+
+  // Hent dynamisk xPct fra Pulse
+  await fetchDynamicXPct();
+
+  // Tesla-sjekk
+  try { await checkTeslaPrices(); } catch(err) { console.error('Tesla feil:', err.message); }
+
+  const pendingCars = await fetchPendingCars();
+  if (pendingCars.length === 0) { console.log('Ingen biler i ko.'); return; }
+
+  let browser;
+  const results = [];
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'nb-NO,nb;q=0.9' });
+
+    for (const car of pendingCars) {
+      try {
+        const result = await processCar(car, page, null);
+        results.push({ status: 'ok', regNr: car.regNr, ...result });
+      } catch(err) {
+        console.error('  FEIL:', err.message);
+        results.push({ status: 'error', regNr: car.regNr, error: err.message });
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  } catch(err) {
+    console.error('Fatal:', err.message);
+    await sendTelegram('peasy-auto feil: ' + err.message);
+  } finally {
+    if (browser) await browser.close();
+  }
+
+  if (results.length > 0) {
+    const time = runTime.toLocaleTimeString('nb-NO', { hour: '2-digit', minute: '2-digit' });
+    await sendTelegram('<b>PEASY-AUTO | ' + time + '</b>');
+    for (const r of results) {
+      if (r.status === 'error') {
+        await sendTelegram('<b>' + r.regNr + '</b> - FEIL: ' + r.error);
+      } else {
+        await sendTelegram(buildTelegramText(r));
+      }
+    }
+    console.log('Telegram sendt');
+  }
+  console.log('Ferdig.');
+}
+
+// ── Tesla prisovervåking ────────────────────────────────────
+async function checkTeslaPrices() {
+  const TESLA_CACHE = 'tesla-prices.json';
+  const query = encodeURIComponent(JSON.stringify({
+    query: { model: 'm3', condition: 'new', options: {}, arrangeby: 'Price', order: 'asc', market: 'NO', language: 'no', super_region: 'europe', zip: '0001', range: 0, region: 'NO' },
+    offset: 0, count: 50, outsideOffset: 0, outsideSearch: false
+  }));
+  const res = await fetch('https://www.tesla.com/inventory/api/v4/inventory-results?query=' + query, {
+    headers: { 'User-Agent': 'Tesla/4.30.6 CFNetwork/1410.0.3 Darwin/22.6.0', 'Accept': 'application/json' }
+  });
+  if (!res.ok) throw new Error('Tesla API ' + res.status);
+  const data = await fetch('https://www.tesla.com/inventory/api/v4/inventory-results?query=' + query, {
+    headers: { 'User-Agent': 'Tesla/4.30.6 CFNetwork/1410.0.3 Darwin/22.6.0', 'Accept': 'application/json' }
+  }).then(r => r.json()).catch(() => ({ results: [] }));
+  const results = data.results || [];
+  const cache = loadJSON(TESLA_CACHE);
+  const newCache = {};
+  const alerts = [];
+  for (const car of results) {
+    const vin = car.VIN; if (!vin) continue;
+    const basePrice  = Math.round(car.CashDetails?.cash?.inventoryPriceWithoutDiscounts || 0);
+    const discount   = Math.round(car.CashDetails?.cash?.inventoryDiscountWithTax || 0);
+    const finalPrice = basePrice - discount;
+    const trimName   = car.TrimName || 'Model 3';
+    newCache[vin] = { finalPrice, trimName, discount };
+    if (cache[vin] && finalPrice < cache[vin].finalPrice) {
+      alerts.push({ trimName, oldPrice: cache[vin].finalPrice, finalPrice, drop: cache[vin].finalPrice - finalPrice });
+    } else if (!cache[vin] && discount > 0) {
+      alerts.push({ trimName, finalPrice, drop: discount, isNew: true });
+    }
+  }
+  saveJSON(TESLA_CACHE, newCache);
+  if (alerts.length > 0) {
+    let msg = 'TESLA MODEL 3 PRISREDUKSJON\n\n';
+    for (const a of alerts) {
+      msg += 'Model 3 ' + a.trimName + '\n';
+      if (!a.isNew) msg += 'Senket med ' + fmtNOKstr(a.drop) + ' | Var: ' + fmtNOKstr(a.oldPrice) + '\n';
+      msg += 'Na: ' + fmtNOKstr(a.finalPrice) + '\n\n';
+    }
+    await sendTelegram(msg);
+  } else {
+    console.log('  Ingen Tesla prisendringer');
+  }
+}
+
+// ── Telegram kommandoer ─────────────────────────────────────
 async function pollTelegramCommands() {
   let offset = 0;
   setInterval(async () => {
@@ -585,127 +714,71 @@ async function pollTelegramCommands() {
       for (const update of data.result || []) {
         offset = update.update_id + 1;
         const msgTime = update.message?.date || 0;
-        const text0 = update.message?.text?.trim() || "";
-        const isFinn = text0.startsWith("/finn ");
+        const text = update.message?.text?.trim() || '';
+        const isFinn = text.startsWith('/finn ');
         if (!isFinn && Date.now() / 1000 - msgTime > 60) continue;
-        const text = update.message?.text?.trim();
+
+        // /run — tving kjøring
         if (text === '/run') {
-          console.log('/run received');
+          console.log('/run mottatt');
           await sendTelegram('Kjoring startet...');
           run(true);
         }
-        if (text === '/rerun') {
-          console.log('/rerun received');
-          const pendingCars = await fetchPendingCars();
-          if (pendingCars.length === 0) {
-            await sendTelegram('Ingen biler i koen.');
-          } else {
-            pendingCars.forEach(c => delete processed[c.regNr]);
-            await sendTelegram('Kjorer om igjen ' + pendingCars.length + ' bil(er)...');
-            run(true);
-          }
-        }
+
+        // /status
         if (text === '/status') {
-          await sendTelegram('Bot kjorer | ' + Object.keys(processed).length + ' biler behandlet');
+          await sendTelegram('Bot kjorer | Dynamic xPct: ' + (_dynamicXPct ? 'lastet' : 'PDEC1 fallback'));
         }
-        if (text && text.startsWith('/finn ')) {
+
+        // /finn REGNR URL — manuell komp-liste, identisk eval-kort og ERP-skriving
+        if (isFinn) {
+          console.log('/finn mottatt');
           const parts = text.replace('/finn ', '').trim().split(' ');
           const hasReg = parts[0].match(/^[A-Z]{2}\d{5}$/);
-          const regNr = hasReg ? parts[0] : null;
+          const regNr  = hasReg ? parts[0] : null;
           const finnUrl = hasReg ? parts.slice(1).join(' ') : parts.join(' ');
-          console.log('/finn received');
-          await sendTelegram('Henter Finn-data...');
-          let carInfo = null;
-          let erpCar = null;
-          let heftelser = null;
-          if (regNr) {
-            try { carInfo = await getVegvesenData(regNr); } catch(e) {}
-            try {
-              const erpToken = await getERPToken();
-              const erpRes = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/processing/estimating_ar_final?per_page=50', { headers: { 'Authorization': 'Bearer ' + erpToken } });
-              const erpData = await erpRes.json();
-              const allCars = erpData.data?.data?.data || [];
-              const erpRes2 = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/processing/estimating_ar_temp?per_page=50', { headers: { 'Authorization': 'Bearer ' + erpToken } });
-              const erpData2 = await erpRes2.json();
-              const allCars2 = erpData2.data?.data?.data || [];
-              const found = [...allCars, ...allCars2].find(c => c.registration_number === regNr);
-              if (found) erpCar = { km: found.mileage || 0, year: found.model_year || 0, erpId: found.id, hasSdComment: found.has_sd_comment === 1 };
-            } catch(e) {}
-            if (regNr && !erpCar) { await sendTelegram('???????????? ' + regNr + ' ikke funnet i ERP-koen. Bilen er allerede behandlet eller ikke registrert.'); return; }
-            if (erpCar?.erpId) { try { const t = await getERPToken(); erpCar.comment = await getERPCarComment(erpCar.erpId, t); } catch(e) {} }
-          }
-          let br;
-          try {
-            br = await chromium.launch({ headless: true });
-            const pg = await br.newPage();
-            await pg.goto(finnUrl, { waitUntil: 'networkidle', timeout: 30000 });
-            await pg.waitForTimeout(2000);
-            const comps = await pg.evaluate(() => {
-              return Array.from(document.querySelectorAll('article')).slice(0, 30).map(a => {
-                const text = a.innerText || '';
-                const price = parseInt((text.match(/(\d[\d\s]+)\s*kr/) || [])[1]?.replace(/\s/g, '')) || 0;
-                const kmMatch = text.match(/\b(20\d{2}|19\d{2})\b.*?([\d\s]+)\s*km[^\w]/); const km = kmMatch ? parseInt(kmMatch[2].replace(/\s/g,'')) : 0;
-                const year = parseInt((text.match(/\b(19\d{2}|20\d{2})\b/) || [])[1]) || 0;
-                const title = a.querySelector('h2')?.innerText || '';
-                return { title, price, km, year };
-              }).filter(c => c.price >= 20000 && c.price <= 2000000);
-            });
-            const seen2 = new Set();
-            const compsUniq = comps.filter(c => { const k = c.price+'-'+c.km; if(seen2.has(k)) return false; seen2.add(k); return true; });
-            comps.length = 0; compsUniq.forEach(c => comps.push(c));
-            const fakeCar = { make: carInfo ? carInfo.make : 'ukjent', model: carInfo ? carInfo.model : '', year: erpCar ? erpCar.year : 0, km: erpCar ? erpCar.km : 0 };
-            const fakeSpecs = { fuel: carInfo ? carInfo.fuel : ' ', gearbox: carInfo ? carInfo.gearbox : ' ', drive: carInfo ? carInfo.drive : ' ', kw: carInfo ? carInfo.kw : 0 };
-            heftelser = await checkHeftelser(regNr, pg);
-            let finnListing = null;
-            if (regNr) finnListing = await checkFinnListing(regNr, pg);
-            if (finnListing) { comps.splice(0, comps.length, ...comps.filter(c => !(Math.abs(c.price - finnListing.price) < 1000 && Math.abs(c.km - fakeCar.km) < 2000))); }
-            await br.close();
-            if (comps.length === 0) {
-              await sendTelegram('Ingen resultater funnet.');
-            } else {
-              const anchor = await aiPickAnchor(fakeCar, fakeSpecs, comps);
-              const carKm = erpCar?.km || 0;
-              const carYear = erpCar?.year || 0;
-              const top5 = comps.slice().sort((a,b) => a.price - b.price).slice(0, 5);
-              const avg  = Math.round(comps.reduce((s, c) => s + c.price, 0) / comps.length);
-              const lowest = anchor ? anchor.price : Math.min(...comps.map(c => c.price));
-              const val  = calcValuation(lowest);
-              const hk = Math.round((carInfo?.kw || 0) * 1.36);
-              let reply = '????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????\n';
-              reply += '???????? <b>' + (regNr || '') + ' ?????? ' + (carInfo?.make || '') + ' ' + (carInfo?.model || '') + ' ' + carYear + '</b>\n';
-              reply += (carKm ? carKm.toLocaleString('nb-NO') : '0') + 'km | ' + (carInfo?.fuel || '') + ' | ' + (carInfo?.gearbox || '') + ' | ' + (carInfo?.drive || '') + ' | ' + hk + 'hk\n';
-              reply += '????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????\n\n';
-              reply += '???????? <b>FINN-S????K (MANUELL)</b>\n';
-              reply += comps.length + ' treff | <a href="' + finnUrl + '">????pne s????k</a>\n';
-              reply += '????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????\n\n';
-              reply += '???????? <b>FINN KOMPS</b>\n';
-              top5.forEach((c, i) => {
-                const isAnker = anchor && c.price === anchor.price && c.km === anchor.km;
-                reply += (i + 1) + '. ' + c.price.toLocaleString('nb-NO') + ' kr | ' + c.km.toLocaleString('nb-NO') + 'km | ' + c.year + (isAnker ? ' ?????? anker' : '') + '\n';
-              });
-              reply += 'Snitt: <b>' + fmtNOKstr(avg) + '</b>\n';
-              if (anchor && anchor.aiReason) reply += '???????? ' + anchor.aiReason + '\n';
-              reply += '????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????\n\n';
-              reply += '???????? <b>KALKYLE</b>\n';
-              reply += '   Anker:          ' + lowest.toLocaleString('nb-NO') + ' kr\n';
-              reply += '   x 0.88:         ' + val.sannsynligBud.toLocaleString('nb-NO') + ' kr\n';
-              reply += '   Peasy fee (U): -' + val.fee.toLocaleString('nb-NO') + ' kr\n';
-              reply += '   D mid:          ' + val.dMid.toLocaleString('nb-NO') + ' kr\n';
-              reply += '<b>   Estimert:      ' + val.dLow.toLocaleString('nb-NO') + ' - ' + val.dHigh.toLocaleString('nb-NO') + ' kr</b>\n';
-              reply += '   Est. bud (E):  ~' + val.eBud.toLocaleString('nb-NO') + ' kr  (' + (val.xPct >= 0 ? '+' : '') + (val.xPct * 100).toFixed(1) + '%)\n\n';
-              if (finnListing) reply += 'Finn-annonse: ?????? <a href="https://www.finn.no/mobility/search/car?q=' + regNr + '">' + finnListing.price.toLocaleString('nb-NO') + ' kr (' + finnListing.km.toLocaleString('nb-NO') + ' km)</a>\n';
 
-              else reply += 'Finn-annonse: ?????? Ikke funnet\n';
-              if (heftelser) reply += 'Heftelser: ' + heftelser + '\n';
-              if (erpCar?.comment) reply += 'Kundekommentar: ' + erpCar.comment.substring(0, 300) + '\n';
-              reply += '????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????\n\n';
-              reply += '???????? <b>ERP</b>\n';
-              reply += '???????????? Ikke skrevet ?????? manuell gjennomgang\n';
-              await sendTelegram(reply);
+          if (!regNr || !finnUrl) {
+            await sendTelegram('Format: /finn REGNR https://finn.no/...');
+            continue;
+          }
+
+          await sendTelegram('Henter data for ' + regNr + '...');
+
+          try {
+            // Hent bildata fra ERP-kø
+            const token = await getERPToken();
+            let erpCar = null;
+            for (const ep of ['estimating_ar_final', 'estimating_ar_temp']) {
+              const r = await fetch('https://api.biladministrasjon.no/c2b_module/driveno/processing/' + ep + '?per_page=100', {
+                headers: { 'Authorization': 'Bearer ' + token }
+              });
+              const d = await r.json();
+              const found = (d.data?.data?.data || []).find(c => c.registration_number === regNr);
+              if (found) {
+                erpCar = { erpId: found.id, regNr, make: found.manufacturer || '', model: found.model_series || '', year: found.model_year || 0, km: found.mileage || 0, hasSdComment: found.has_sd_comment === 1, source: found.source || '' };
+                break;
+              }
+            }
+            if (!erpCar) {
+              await sendTelegram(regNr + ' ikke funnet i ERP-ko. Allerede behandlet?');
+              continue;
+            }
+
+            await fetchDynamicXPct();
+
+            let br;
+            try {
+              br = await chromium.launch({ headless: true });
+              const pg = await br.newPage();
+              await pg.setExtraHTTPHeaders({ 'Accept-Language': 'nb-NO,nb;q=0.9' });
+              const result = await processCar(erpCar, pg, finnUrl);
+              await sendTelegram(buildTelegramText({ ...result, regNr, car: erpCar }));
+            } finally {
+              if (br) await br.close();
             }
           } catch(e) {
-            if (br) await br.close();
-            await sendTelegram('Feil: ' + e.message);
+            await sendTelegram('/finn feil: ' + e.message);
           }
         }
       }
@@ -713,11 +786,14 @@ async function pollTelegramCommands() {
   }, 5000);
 }
 
+// ── Start ───────────────────────────────────────────────────
 async function startScheduler() {
-  console.log('peasy-auto started');
+  console.log('peasy-auto startet');
   await run();
   pollTelegramCommands();
-  setInterval(async () => { if (new Date().getMinutes() === 0) await run(); }, 60000);
+  setInterval(async () => {
+    if (new Date().getMinutes() === 0) await run();
+  }, 60000);
   process.on('SIGINT', () => process.exit(0));
 }
 
