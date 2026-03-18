@@ -769,13 +769,13 @@ async function pollTelegramCommands() {
 
             let br;
             try {
-              br = await chromium.launch({ headless: true });
+              br = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
               const pg = await br.newPage();
               await pg.setExtraHTTPHeaders({ 'Accept-Language': 'nb-NO,nb;q=0.9' });
               const result = await processCar(erpCar, pg, finnUrl);
               await sendTelegram(buildTelegramText({ ...result, regNr, car: erpCar }));
             } finally {
-              if (br) await br.close();
+              if (br) { try { await br.close(); } catch(e){} }
             }
           } catch(e) {
             await sendTelegram('/finn feil: ' + e.message);
