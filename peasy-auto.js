@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.c
+// peasy-auto.js v18.03.d
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.c';
+const VERSION = 'v18.03.d';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -139,31 +139,93 @@ async function getErpCarDetail(erpId, token) {
   return data.data?.car || null;
 }
 
-// ── ERP: Skriv til ERP (EC-24) ────────────────────────────────
-async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, token) {
-  log(`ERP: PUT bil ${erpId}...`);
-  const today = new Date().toISOString().substring(0, 10);
+// ── ERP: Fyll inn felt via Playwright (EC-24) ─────────────────
+// Navigerer til ERP-siden, setter toggles/dropdown og klikker Lagre
+async function fillErpViaBrowser(erpId, dLav, dHoy, auctionTypeId, anyDebts) {
+  log(`ERP UI: oppdaterer bil ${erpId} via Playwright...`);
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+    const context = await browser.newContext();
+    const page = await context.newPage();
 
+    // 1. Logg inn i ERP
+    await page.goto('https://biladministrasjon.no/login', { waitUntil: 'networkidle', timeout: 20000 });
+    await page.fill('input[type="email"], input[name="email"]', process.env.ERP_USER);
+    await page.fill('input[type="password"], input[name="password"]', process.env.ERP_PASS);
+    await page.click('button[type="submit"]');
+    await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 });
+    log('ERP UI: innlogget');
+
+    // 2. Naviger til bilen
+    await page.goto(`https://biladministrasjon.no/cars_driveno/processing/estimating_final/${erpId}`, {
+      waitUntil: 'networkidle', timeout: 20000
+    });
+    await page.waitForTimeout(1500);
+    log(`ERP UI: navigert til bil ${erpId}`);
+
+    // 3. Sett auction type
+    await page.selectOption('#auction_price_type_id', String(auctionTypeId));
+    log(`ERP UI: auction type satt til ${auctionTypeId}`);
+
+    // 4. Toggle heftelser kontrollert (alltid på)
+    const encumbrance = page.locator('#encumbrances');
+    const encChecked = await encumbrance.isChecked();
+    if (!encChecked) {
+      await encumbrance.click();
+      log('ERP UI: heftelser toglet på');
+    }
+
+    // 5. Toggle finans kun hvis heftelser
+    if (anyDebts) {
+      const anyDebtsEl = page.locator('#encumbrances_any_debts');
+      const anyDebtsChecked = await anyDebtsEl.isChecked();
+      if (!anyDebtsChecked) {
+        await anyDebtsEl.click();
+        log('ERP UI: finans toglet på (heftelser funnet)');
+      }
+    }
+
+    // 6. Toggle eiere sjekket (alltid på)
+    const owners = page.locator('#owners\\.checked_hint');
+    const ownersChecked = await owners.isChecked();
+    if (!ownersChecked) {
+      await owners.click();
+      log('ERP UI: eiere sjekket toglet på');
+    }
+
+    // 7. Klikk Lagre data
+    await page.click('button.btn-primary:has-text("Lagre data")');
+    await page.waitForTimeout(2000);
+    log('ERP UI: Lagre data klikket');
+
+    return true;
+  } catch (err) {
+    logErr(`fillErpViaBrowser ${erpId}`, err);
+    return false;
+  } finally {
+    if (browser) { try { await browser.close(); } catch (e) {} }
+  }
+}
+
+// ── ERP: Skriv D lav/høy via API PUT ─────────────────────────
+async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, token) {
+  log(`ERP: PUT D lav/hoy for bil ${erpId}...`);
   const payload = {
     price_final_min: dLav,
     price_final_max: dHoy,
-    auction_price_type_id: auctionTypeId,
-    encumbrance: { checkmark: true, any_debts: anyDebts },
-    owners_check_date: today,
-    owners_is_checked: true,
   };
-  if (anyDebts) payload.finance = { has_finance: true };
-
   const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}`, {
     method: 'PUT',
     headers: { ...authH(token), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-
   if (data.success) {
-    log(`ERP: bil ${erpId} OK (dLav=${dLav}, dHoy=${dHoy}, type=${auctionTypeId})`);
-    return true;
+    log(`ERP: D lav/hoy OK (${dLav} - ${dHoy})`);
+    // Fyll inn resten via Playwright
+    const uiOk = await fillErpViaBrowser(erpId, dLav, dHoy, auctionTypeId, anyDebts);
+    return uiOk;
   }
   logErr(`writeToERP ${erpId}`, data);
   return false;
