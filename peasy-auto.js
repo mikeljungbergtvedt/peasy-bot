@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.d
+// peasy-auto.js v18.03.e
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.d';
+const VERSION = 'v18.03.e';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -568,12 +568,15 @@ function formatEvalCard(p) {
 
   // EC-24
   const erpLines = [
-    p.erpWritten ? '✅ D lav/hoy skrevet' : '❌ ERP-skriving feilet',
-    `✅ Auction type: ${p.valuation.auctionTypeId === 2 ? '2 Lower price (≤35k)' : '1 Regular (>35k)'}`,
-    '✅ Heftelser kontrollert (alltid)',
-    p.brreg.anyDebts ? '✅ Finans? satt (heftelser funnet)' : '— Finans? ikke satt',
-    '✅ Eiere sjekket (alltid)',
-    p.chatPosted ? '✅ Eval-kort postet til chat' : '— Chat: allerede postet',
+    p.erpWritten ? '✅ D lav/hoy skrevet' : '❌ D lav/hoy FEILET',
+    p.erpWritten ? `✅ Auction type: ${p.valuation.auctionTypeId === 2 ? '2 Lower price (≤35k)' : '1 Regular (>35k)'}` : '❌ Auction type ikke satt',
+    p.erpWritten ? '✅ Heftelser kontrollert' : '❌ Heftelser ikke toglet',
+    p.brreg.anyDebts
+      ? (p.erpWritten ? '✅ Finans? satt (heftelser funnet)' : '❌ Finans? ikke satt')
+      : '— Finans? ikke aktuelt',
+    p.erpWritten ? '✅ Eiere sjekket' : '❌ Eiere ikke toglet',
+    p.erpWritten ? '✅ Lagre data klikket' : '❌ Lagre data ikke klikket',
+    p.chatPosted ? '✅ Eval-kort postet til kommentar' : '— Kommentar: allerede postet',
   ].join('\n');
 
   return [
