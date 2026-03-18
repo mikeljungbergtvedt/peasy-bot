@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.e
+// peasy-auto.js v18.03.f
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.e';
+const VERSION = 'v18.03.f';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -140,95 +140,70 @@ async function getErpCarDetail(erpId, token) {
 }
 
 // ── ERP: Fyll inn felt via Playwright (EC-24) ─────────────────
-// Navigerer til ERP-siden, setter toggles/dropdown og klikker Lagre
-async function fillErpViaBrowser(erpId, dLav, dHoy, auctionTypeId, anyDebts) {
-  log(`ERP UI: oppdaterer bil ${erpId} via Playwright...`);
-  let browser;
+async function fillErpViaBrowser(erpId, auctionTypeId, anyDebts, page) {
+  log(`ERP UI: oppdaterer bil ${erpId}...`);
   try {
-    browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
-    const context = await browser.newContext();
-    const page = await context.newPage();
-
-    // 1. Logg inn i ERP
+    // Logg inn og naviger
     await page.goto('https://biladministrasjon.no/login', { waitUntil: 'networkidle', timeout: 20000 });
-    await page.fill('input[type="email"], input[name="email"]', process.env.ERP_USER);
-    await page.fill('input[type="password"], input[name="password"]', process.env.ERP_PASS);
-    await page.click('button[type="submit"]');
-    await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 });
-    log('ERP UI: innlogget');
+    
+    // Sjekk om vi allerede er innlogget
+    if (page.url().includes('/login')) {
+      await page.fill('input[type="email"], input[name="email"]', process.env.ERP_USER);
+      await page.fill('input[type="password"], input[name="password"]', process.env.ERP_PASS);
+      await page.click('button[type="submit"]');
+      await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 });
+      log('ERP UI: innlogget');
+    }
 
-    // 2. Naviger til bilen
     await page.goto(`https://biladministrasjon.no/cars_driveno/processing/estimating_final/${erpId}`, {
       waitUntil: 'networkidle', timeout: 20000
     });
-    await page.waitForTimeout(1500);
-    log(`ERP UI: navigert til bil ${erpId}`);
+    await page.waitForTimeout(2000);
 
-    // 3. Sett auction type
+    // Auction type
     await page.selectOption('#auction_price_type_id', String(auctionTypeId));
-    log(`ERP UI: auction type satt til ${auctionTypeId}`);
 
-    // 4. Toggle heftelser kontrollert (alltid på)
+    // Heftelser toggle (alltid på)
     const encumbrance = page.locator('#encumbrances');
-    const encChecked = await encumbrance.isChecked();
-    if (!encChecked) {
-      await encumbrance.click();
-      log('ERP UI: heftelser toglet på');
-    }
+    if (!await encumbrance.isChecked()) await encumbrance.click();
 
-    // 5. Toggle finans kun hvis heftelser
+    // Finans kun hvis heftelser
     if (anyDebts) {
       const anyDebtsEl = page.locator('#encumbrances_any_debts');
-      const anyDebtsChecked = await anyDebtsEl.isChecked();
-      if (!anyDebtsChecked) {
-        await anyDebtsEl.click();
-        log('ERP UI: finans toglet på (heftelser funnet)');
-      }
+      if (!await anyDebtsEl.isChecked()) await anyDebtsEl.click();
     }
 
-    // 6. Toggle eiere sjekket (alltid på)
+    // Eiere sjekket (alltid på)
     const owners = page.locator('#owners\\.checked_hint');
-    const ownersChecked = await owners.isChecked();
-    if (!ownersChecked) {
-      await owners.click();
-      log('ERP UI: eiere sjekket toglet på');
-    }
+    if (!await owners.isChecked()) await owners.click();
 
-    // 7. Klikk Lagre data
+    // Lagre data
     await page.click('button.btn-primary:has-text("Lagre data")');
     await page.waitForTimeout(2000);
-    log('ERP UI: Lagre data klikket');
 
+    log(`ERP UI: bil ${erpId} lagret OK`);
     return true;
   } catch (err) {
     logErr(`fillErpViaBrowser ${erpId}`, err);
     return false;
-  } finally {
-    if (browser) { try { await browser.close(); } catch (e) {} }
   }
 }
 
-// ── ERP: Skriv D lav/høy via API PUT ─────────────────────────
-async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, token) {
+// ── ERP: Skriv D lav/høy via API + fyll UI via Playwright ─────
+async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, token, page) {
   log(`ERP: PUT D lav/hoy for bil ${erpId}...`);
-  const payload = {
-    price_final_min: dLav,
-    price_final_max: dHoy,
-  };
+  const payload = { price_final_min: dLav, price_final_max: dHoy };
   const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}`, {
     method: 'PUT',
     headers: { ...authH(token), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (data.success) {
-    log(`ERP: D lav/hoy OK (${dLav} - ${dHoy})`);
-    // Fyll inn resten via Playwright
-    const uiOk = await fillErpViaBrowser(erpId, dLav, dHoy, auctionTypeId, anyDebts);
-    return uiOk;
-  }
-  logErr(`writeToERP ${erpId}`, data);
-  return false;
+  if (!data.success) { logErr(`writeToERP PUT ${erpId}`, data); return false; }
+  log(`ERP: D lav/hoy OK`);
+
+  // Fyll toggles og lagre via Playwright
+  return await fillErpViaBrowser(erpId, auctionTypeId, anyDebts, page);
 }
 
 // ── ERP: Post eval-kort til intern kommentar (kun 1 gang) ─────
@@ -679,10 +654,10 @@ async function evalCar(bil, page, cache, opts = {}) {
       sdComment = detail?.self_declaration?.comment || null;
     } catch (e) { logErr('getErpCarDetail', e); }
 
-    // 8. Skriv til ERP (EC-24 steg 1-5)
+    // 8. Skriv til ERP (EC-24)
     const erpWritten = await writeToERP(
       erpId, valuation.dLav, valuation.dHoy,
-      valuation.auctionTypeId, brreg.anyDebts, token
+      valuation.auctionTypeId, brreg.anyDebts, token, page
     );
 
     // 9. Bygg eval-kort og post til chat (EC-24 steg 6)
