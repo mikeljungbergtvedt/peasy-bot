@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.a
+// peasy-auto.js v18.03.b
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -16,7 +16,7 @@
 //   checkFinnListing() — sjekker om bilen er pa Finn
 //   checkBrreg()       — heftelsessjekk via Playwright
 //   writeToERP()       — PUT med alle EC-24 felter
-//   postToChat()       — POST til chat-boble, kun 1 gang
+//   postToChat()       — POST til intern kommentar, kun 1 gang
 //   sendTelegram()     — sender eval-kort
 //   checkTeslaPrices() — Tesla prisovervaking (aktiv ut mars 2026)
 // ============================================================
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.a';
+const VERSION = 'v18.03.b';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -169,28 +169,30 @@ async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, token) {
   return false;
 }
 
-// ── ERP: Post til chat-boble (kun 1 gang) ─────────────────────
+// ── ERP: Post eval-kort til intern kommentar (kun 1 gang) ─────
 async function postToChat(erpId, evalText, token) {
-  const checkRes = await fetch(`${CONFIG.erp.base}/chat/peasy_car/${erpId}`, {
+  // Sjekk eksisterende kommentarer
+  const checkRes = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}/comments/all`, {
     headers: authH(token),
   });
   const checkData = await checkRes.json();
   const existing = checkData.data || [];
 
-  if (existing.length > 0) {
-    log(`Chat: bil ${erpId} har ${existing.length} melding(er) — skipper`);
+  // Hopp over hvis Peasy-kommentar allerede finnes
+  if (existing.some(c => (c.comment || '').includes('BIL TIL ESTIMERING'))) {
+    log(`Kommentar: bil ${erpId} har allerede eval-kort — skipper`);
     return false;
   }
 
   const plain = evalText.replace(/<[^>]+>/g, '');
-  const res = await fetch(`${CONFIG.erp.base}/chat/peasy_car/${erpId}`, {
+  const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}/comments`, {
     method: 'POST',
     headers: { ...authH(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: plain }),
+    body: JSON.stringify({ comment: plain }),
   });
   const data = await res.json();
 
-  if (data.success) { log(`Chat: postet for bil ${erpId}`); return true; }
+  if (data.success) { log(`Kommentar: postet for bil ${erpId}`); return true; }
   logErr(`postToChat ${erpId}`, data);
   return false;
 }
