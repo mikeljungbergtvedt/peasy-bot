@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.b
+// peasy-auto.js v18.03.c
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.b';
+const VERSION = 'v18.03.c';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -176,7 +176,7 @@ async function postToChat(erpId, evalText, token) {
     headers: authH(token),
   });
   const checkData = await checkRes.json();
-  const existing = checkData.data || [];
+  const existing = Array.isArray(checkData.data) ? checkData.data : [];
 
   // Hopp over hvis Peasy-kommentar allerede finnes
   if (existing.some(c => (c.comment || '').includes('BIL TIL ESTIMERING'))) {
