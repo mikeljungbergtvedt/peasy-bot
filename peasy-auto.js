@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.n
+// peasy-auto.js v18.03.o
 // Peasy C2B Bruktbil â Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
