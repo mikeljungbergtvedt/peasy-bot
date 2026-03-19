@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.p
+// peasy-auto.js v18.03.n
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -130,7 +130,7 @@ async function getListe3() {
   return biler;
 }
 
-// ── ERP: Hent liste 2 og flytt til liste 3 ───────────────────
+// ERP: Hent liste 2
 async function getListe2() {
   const token = await getErpToken();
   const res = await fetch(
@@ -138,32 +138,30 @@ async function getListe2() {
     { headers: authH(token) }
   );
   const data = await res.json();
-  return data.data?.data?.data || [];
+  const biler = data.data?.data?.data || [];
+  log(`ERP: ${biler.length} biler pa liste 2`);
+  return biler;
 }
 
+// ERP: Flytt bil fra liste 2 til liste 3 via Playwright
 async function promoteToListe3(erpId, page) {
-  log(`Liste 2: flytter bil ${erpId} til liste 3...`);
+  log(`Liste 2: promoterer bil ${erpId}...`);
   try {
     await page.goto(
       `https://biladministrasjon.no/cars_driveno/processing/estimating_temp/${erpId}`,
       { waitUntil: 'networkidle', timeout: 20000 }
     );
     await page.waitForTimeout(2000);
-
-    // Sett Forelopig AR verdi min og max = 1
-    const allInputs = await page.$$('input[type="number"]');
+    const allInputs = await page.$('input[type="number"]');
     const ids = await Promise.all(allInputs.map(i => i.getAttribute('id')));
     const tempInputs = allInputs.filter((_, i) => ids[i] === 'price_temp_min');
     if (tempInputs.length >= 2) {
       await tempInputs[0].fill('1');
       await tempInputs[1].fill('1');
     }
-
-    // Klikk "Lagre data og endre status"
     await page.click('button:has-text("endre status")');
     await page.waitForTimeout(3000);
-
-    log(`Liste 2: bil ${erpId} flyttet til liste 3 OK`);
+    log(`Liste 2: bil ${erpId} promotert OK`);
     return true;
   } catch (err) {
     logErr(`promoteToListe3 ${erpId}`, err);
@@ -496,16 +494,11 @@ async function checkBrreg(regnr, page) {
 // ── AI-anker ──────────────────────────────────────────────────
 async function getAnchor(pool, bil, vegData) {
   const top5 = pool.slice(0, 5);
-  const currentYear = new Date().getFullYear();
 
-  // Filtrer ut biler med urealistisk årstall
-  const yearFiltered = top5.filter(c => c.year === 0 || (c.year >= 1990 && c.year <= currentYear));
-  const working1 = yearFiltered.length >= 2 ? yearFiltered : top5;
-
-  // Filtrer ut prisuliggere — under 40% av snitt
-  const snitt = working1.reduce((s, c) => s + c.price, 0) / working1.length;
-  const filtered = working1.filter(c => c.price >= snitt * 0.4);
-  const working = filtered.length >= 2 ? filtered : working1;
+  // Filtrer ut prisuliggere — biler under 40% av snitt er trolig skrap/feil data
+  const snitt = top5.reduce((s, c) => s + c.price, 0) / top5.length;
+  const filtered = top5.filter(c => c.price >= snitt * 0.4);
+  const working = filtered.length >= 2 ? filtered : top5; // fallback hvis for få igjen
   const hk = Math.round((vegData.kw || 0) * 1.36);
   const listings = working.map((c, i) =>
     `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`
@@ -614,7 +607,7 @@ function calcValuation(anchorPrice) {
 // ── Formater eval-kort ────────────────────────────────────────
 function formatEvalCard(p) {
   const source = (p.bil.source || '').toLowerCase() === 'driveno' ? 'DRIVE' : 'PEASY';
-  const qaTag = p.qaOverride ? ' ! QA OVERRIDE' : '';
+  const qaTag = p.qaOverride ? ' ⚡ QA OVERRIDE' : '';
   const isEl = p.vegData.fuel.toLowerCase().includes('elektr');
   const hkStr = isEl
     ? (p.vegData.range ? `${p.vegData.range} km rekkevidde` : `${p.vegData.kw} kW`)
@@ -624,7 +617,7 @@ function formatEvalCard(p) {
   const compLines = top5.map((c, i) => {
     const isAnker = i === p.anchor.index;
     const line = `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`;
-    return isAnker ? `<b>> ${line} <-- anker</b>` : `   ${line}`;
+    return isAnker ? `<b>▶ ${line} ← anker</b>` : `   ${line}`;
   }).join('\n');
   const snitt = Math.round(top5.reduce((s, c) => s + c.price, 0) / top5.length);
 
@@ -642,15 +635,15 @@ function formatEvalCard(p) {
 
   // EC-24
   const erpLines = [
-    p.erpWritten ? 'OK: D lav/hoy skrevet' : 'FEIL: D lav/hoy FEILET',
-    p.erpWritten ? `OK: Auction type: ${p.valuation.auctionTypeId === 2 ? '2 Lower price (≤35k)' : '1 Regular (>35k)'}` : 'FEIL: Auction type ikke satt',
-    p.erpWritten ? 'OK: Heftelser kontrollert' : 'FEIL: Heftelser ikke toglet',
+    p.erpWritten ? '✅ D lav/hoy skrevet' : '❌ D lav/hoy FEILET',
+    p.erpWritten ? `✅ Auction type: ${p.valuation.auctionTypeId === 2 ? '2 Lower price (≤35k)' : '1 Regular (>35k)'}` : '❌ Auction type ikke satt',
+    p.erpWritten ? '✅ Heftelser kontrollert' : '❌ Heftelser ikke toglet',
     p.brreg.anyDebts
-      ? (p.erpWritten ? 'OK: Finans? satt (heftelser funnet)' : 'FEIL: Finans? ikke satt')
+      ? (p.erpWritten ? '✅ Finans? satt (heftelser funnet)' : '❌ Finans? ikke satt')
       : '— Finans? ikke aktuelt',
-    p.erpWritten ? 'OK: Eiere sjekket' : 'FEIL: Eiere ikke toglet',
-    p.erpWritten ? 'OK: Lagre data klikket' : 'FEIL: Lagre data ikke klikket',
-    p.chatPosted ? 'OK: Eval-kort postet til kommentar' : '— Kommentar: allerede postet',
+    p.erpWritten ? '✅ Eiere sjekket' : '❌ Eiere ikke toglet',
+    p.erpWritten ? '✅ Lagre data klikket' : '❌ Lagre data ikke klikket',
+    p.chatPosted ? '✅ Eval-kort postet til kommentar' : '— Kommentar: allerede postet',
   ].join('\n');
 
   return [
@@ -722,7 +715,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     }
 
     if (pool.length === 0) {
-      await sendTelegram(`NB: ${regnr}: Ingen Finn-komper funnet\n<a href="${finnUrl}">Åpne Finn-søk</a>`);
+      await sendTelegram(`⚠️ ${regnr}: Ingen Finn-komper funnet\n<a href="${finnUrl}">Åpne Finn-søk</a>`);
       return;
     }
 
@@ -778,7 +771,7 @@ async function evalCar(bil, page, cache, opts = {}) {
 
   } catch (err) {
     logErr(`evalCar ${regnr}`, err);
-    await sendTelegram(`FEIL: Feil ved evaluering av ${regnr}: ${err.message}`);
+    await sendTelegram(`❌ Feil ved evaluering av ${regnr}: ${err.message}`);
   }
 }
 
@@ -848,27 +841,25 @@ async function runOnce(cache, force = false) {
   try { await checkTeslaPrices(); } catch (e) { logErr('Tesla', e); }
 
   const biler = await getListe3();
+  if (biler.length === 0) { log('Ingen biler pa liste 3'); return; }
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: false, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+    browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
     const page = await browser.newPage();
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'nb-NO,nb;q=0.9' });
 
-    // Sjekk liste 2 og flytt biler til liste 3
+    // Sjekk liste 2 og promoter til liste 3
     const liste2 = await getListe2();
     if (liste2.length > 0) {
-      log(`Liste 2: ${liste2.length} biler klar for promotering`);
+      log(`Liste 2: ${liste2.length} biler klar`);
       for (const bil of liste2) {
         await promoteToListe3(bil.id, page);
         await new Promise(r => setTimeout(r, 2000));
       }
-      // Hent oppdatert liste 3 etter promotering
-      const oppdatertListe3 = await getListe3();
-      biler.push(...oppdatertListe3.filter(b => !biler.find(x => x.id === b.id)));
+      const ny = await getListe3();
+      for (const b of ny) { if (!biler.find(x => x.id === b.id)) biler.push(b); }
     }
-
-    if (biler.length === 0) { log('Ingen biler pa liste 3'); return; }
 
     for (const bil of biler) {
       await evalCar(bil, page, cache);
@@ -876,7 +867,7 @@ async function runOnce(cache, force = false) {
     }
   } catch (err) {
     logErr('runOnce', err);
-    await sendTelegram(`FEIL: peasy-auto fatal feil: ${err.message}`);
+    await sendTelegram(`❌ peasy-auto fatal feil: ${err.message}`);
   } finally {
     if (browser) { try { await browser.close(); } catch (e) {} }
   }
@@ -901,13 +892,13 @@ async function pollTelegramCommands(cache) {
 
         if (text === '/run') {
           log('/run mottatt');
-          await sendTelegram('>️ Kjoring startet...');
+          await sendTelegram('▶️ Kjoring startet...');
           runOnce(cache, true);
         }
 
         if (text === '/status') {
           await sendTelegram(
-            `OK: Peasy Auto ${VERSION}\n` +
+            `✅ Peasy Auto ${VERSION}\n` +
             `Brackets: ${_brackets ? 'dynamisk fra Pulse' : 'PDEC1 fallback'}\n` +
             `Cache: ${Object.keys(cache).length} biler\n` +
             `Tidspunkt: ${new Date().toLocaleTimeString('nb-NO')}`
@@ -920,13 +911,13 @@ async function pollTelegramCommands(cache) {
           const regnr = parts[0]?.toUpperCase();
           const qaUrl = parts.slice(1).join(' ') || null;
 
-          if (!regnr) { await sendTelegram('NB: Format: /finn REGNR [finn-url]'); continue; }
+          if (!regnr) { await sendTelegram('⚠️ Format: /finn REGNR [finn-url]'); continue; }
 
-          await sendTelegram(` Henter data for ${regnr}...`);
+          await sendTelegram(`🔍 Henter data for ${regnr}...`);
           try {
             const liste3 = await getListe3();
             const bil = liste3.find(b => b.registration_number?.toUpperCase() === regnr);
-            if (!bil) { await sendTelegram(`NB: ${regnr}: ikke funnet pa liste 3`); continue; }
+            if (!bil) { await sendTelegram(`⚠️ ${regnr}: ikke funnet pa liste 3`); continue; }
 
             await fetchBrackets();
             let br;
@@ -940,7 +931,7 @@ async function pollTelegramCommands(cache) {
             }
           } catch (err) {
             logErr('/finn', err);
-            await sendTelegram(`FEIL: /finn feil: ${err.message}`);
+            await sendTelegram(`❌ /finn feil: ${err.message}`);
           }
         }
       }
@@ -962,7 +953,7 @@ async function main() {
   const cache = loadJSON(CACHE_FILE);
   log(`Cache: ${Object.keys(cache).length} biler allerede skrevet`);
 
-  await sendTelegram(`>> Peasy Auto ${VERSION} startet`);
+  await sendTelegram(`🚀 Peasy Auto ${VERSION} startet`);
   await runOnce(cache);
 
   pollTelegramCommands(cache);
