@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.s
+// peasy-auto.js v18.03.t
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.s';
+const VERSION = 'v18.03.t';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -574,8 +574,8 @@ function getRecX(dMid) {
 function calcValuation(anchorPrice) {
   const t88 = Math.round(anchorPrice * 0.88 / 1000) * 1000;
   const tFloor = anchorPrice - 10000;
-  const T = Math.max(t88, tFloor);
-  const minMarginUsed = T > t88;
+  const T = (anchorPrice * 0.12 >= 10000) ? t88 : tFloor;
+  const minMarginUsed = T === tFloor;
 
   const feeEntry = CONFIG.fee.find(f => T < f.maxT);
   const fee = feeEntry.fee;
