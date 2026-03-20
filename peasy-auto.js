@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.t
+// peasy-auto.js v18.03.u
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.t';
+const VERSION = 'v18.03.u';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -152,14 +152,14 @@ async function promoteToListe3(erpId, page) {
       { waitUntil: 'networkidle', timeout: 20000 }
     );
     await page.waitForTimeout(2000);
-    const allInputs = await page.$('input[type="number"]');
-    const ids = await Promise.all(allInputs.map(i => i.getAttribute('id')));
-    const tempInputs = allInputs.filter((_, i) => ids[i] === 'price_temp_min');
+    const tempInputs = await page.$$('input[name="price_temp_min"]');
     if (tempInputs.length >= 2) {
       await tempInputs[0].fill('1');
       await tempInputs[1].fill('1');
+    } else if (tempInputs.length === 1) {
+      await tempInputs[0].fill('1');
     }
-    await page.click('button:has-text("endre status")');
+    await page.click('button:has-text("Lagre data og endre status")');
     await page.waitForTimeout(3000);
     log(`Liste 2: bil ${erpId} promotert OK`);
     return true;
