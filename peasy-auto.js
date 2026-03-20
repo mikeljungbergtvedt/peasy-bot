@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.x
+// peasy-auto.js v18.03.y
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.x';
+const VERSION = 'v18.03.y';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -873,7 +873,7 @@ async function runOnce(cache, force = false) {
   try { await checkTeslaPrices(); } catch (e) { logErr('Tesla', e); }
 
   const biler = await getListe3();
-  if (biler.length === 0) { log('Ingen biler pa liste 3'); return; }
+  if (biler.length === 0) { log('Ingen biler pa liste 3 — sjekker liste 2 likevel'); }
 
   let browser;
   try {
