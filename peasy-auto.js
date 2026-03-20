@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.y
+// peasy-auto.js v18.03.z
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.y';
+const VERSION = 'v18.03.z';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -506,31 +506,37 @@ async function checkBrreg(regnr, page) {
 }
 
 // ── AI-anker ──────────────────────────────────────────────────
-// ENDRING 1: Anker = snitt av 3 billigste. Haiku kommenterer kun.
 async function getAnchor(pool, bil, vegData) {
   const top5 = pool.slice(0, 5);
 
-  const snitt = top5.reduce((s, c) => s + c.price, 0) / top5.length;
-  const filtered = top5.filter(c => c.price >= snitt * 0.4);
-  const working = filtered.length >= 2 ? filtered : top5;
+  // Outlier-filter: forkast biler med mer enn 20% avvik fra snitt
+  const snittAll = top5.reduce((s, c) => s + c.price, 0) / top5.length;
+  const outliers = top5.filter(c => c.price < snittAll * 0.80);
+  const working = top5.filter(c => c.price >= snittAll * 0.80);
+  const safeWorking = working.length >= 2 ? working : top5;
 
-  // Matematisk anker: snitt av 3 billigste (eller færre hvis pool < 3)
-  const nAvg = Math.min(3, working.length);
-  const cheapest = working.slice(0, nAvg);
+  // Matematisk anker: snitt av 3 billigste etter filter (eller færre)
+  const nAvg = Math.min(3, safeWorking.length);
+  const cheapest = safeWorking.slice(0, nAvg);
   const anchorPrice = Math.round(cheapest.reduce((s, c) => s + c.price, 0) / nAvg / 1000) * 1000;
 
-  // Representant-bil: nærmeste pris til snittet
-  const anchorCar = cheapest.reduce((best, c) =>
-    Math.abs(c.price - anchorPrice) < Math.abs(best.price - anchorPrice) ? c : best
-  , cheapest[0]);
-  const anchorIndex = top5.indexOf(anchorCar);
+  // Indeksene til de 3 ▶-bilene i top5
+  const anchorIndices = cheapest.map(c => top5.indexOf(c));
 
-  log(`Anker: snitt av ${nAvg} billigste = ${anchorPrice} kr`);
+  log(`Anker: snitt av ${nAvg} biler = ${anchorPrice} kr | ${outliers.length} forkastet`);
 
   const hk = Math.round((vegData.kw || 0) * 1.36);
   const listings = top5.map((c, i) =>
     `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`
   ).join('\n');
+
+  const outlierText = outliers.length > 0
+    ? `\nForkastede biler (>20% under snitt ${Math.round(snittAll).toLocaleString('nb-NO')} kr):\n` +
+      outliers.map((c, i) => {
+        const avvik = Math.round((1 - c.price / snittAll) * 100);
+        return `  - ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year} (${avvik}% under snitt)`;
+      }).join('\n')
+    : '';
 
   const prompt = `Du er bruktbilekspert i Norge for Peasy (C2B auksjon).
 Bilen som prises: ${bil.model_year || ''} ${vegData.make} ${bil.model_series || ''}, ${(bil.mileage || 0).toLocaleString('nb-NO')} km, ${vegData.fuel}, ${hk} hk
@@ -538,8 +544,10 @@ Bilen som prises: ${bil.model_year || ''} ${vegData.make} ${bil.model_series || 
 Sammenlignbare biler fra Finn (sortert billigst):
 ${listings}
 
-Ankerpris er matematisk satt til snitt av de ${nAvg} billigste: ${anchorPrice.toLocaleString('nb-NO')} kr.
-Kommenter kort (1-2 setninger pa norsk) om dette virker representativt for markedet, og nevn eventuelle avvikende biler.
+Ankerpris er matematisk satt til snitt av de ${nAvg} billigste godkjente: ${anchorPrice.toLocaleString('nb-NO')} kr.${outlierText}
+
+Kommenter kort (1-2 setninger pa norsk) om ankerpris virker representativt.
+Hvis biler ble forkastet, bekreft eller utfordre om eksklusjonen virker riktig.
 Svar KUN med JSON: {"reason": "kommentar pa norsk"}`;
 
   try {
@@ -552,7 +560,7 @@ Svar KUN med JSON: {"reason": "kommentar pa norsk"}`;
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 150,
+        max_tokens: 200,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -560,10 +568,10 @@ Svar KUN med JSON: {"reason": "kommentar pa norsk"}`;
     const text = data.content?.[0]?.text || '';
     const json = JSON.parse(text.replace(/```json|```/g, '').trim());
     log(`Haiku: ${json.reason}`);
-    return { price: anchorPrice, index: anchorIndex >= 0 ? anchorIndex : 0, reason: json.reason, car: anchorCar };
+    return { price: anchorPrice, anchorIndices, outliers, reason: json.reason };
   } catch (e) {
     logErr('getAnchor', e);
-    return { price: anchorPrice, index: anchorIndex >= 0 ? anchorIndex : 0, reason: `Snitt av ${nAvg} billigste (AI fallback)`, car: anchorCar };
+    return { price: anchorPrice, anchorIndices, outliers, reason: `Snitt av ${nAvg} billigste (AI fallback)` };
   }
 }
 
@@ -623,12 +631,22 @@ function formatEvalCard(p, forErp = false) {
     : `${p.vegData.hk} hk`;
 
   const top5 = p.pool.slice(0, 5);
+  const anchorIndices = p.anchor.anchorIndices || [];
   const compLines = top5.map((c, i) => {
-    const isAnker = i === p.anchor.index;
+    const isAnker = anchorIndices.includes(i);
     const line = `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`;
-    return isAnker ? `<b>▶ ${line} ← anker</b>` : `   ${line}`;
+    return isAnker ? `<b>▶ ${line}</b>` : `   ${line}`;
   }).join('\n');
   const snitt = Math.round(top5.reduce((s, c) => s + c.price, 0) / top5.length);
+  const ankerNote = `   (Anker = snitt av ▶-merkede biler: ${p.anchor.price.toLocaleString('nb-NO')} kr)`;
+
+  // FORKASTET-seksjon
+  const outliers = p.anchor.outliers || [];
+  const snittAll = top5.reduce((s, c) => s + c.price, 0) / top5.length;
+  const forkastetLines = outliers.map(c => {
+    const avvik = Math.round((1 - c.price / snittAll) * 100);
+    return `   ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year} (${avvik}% under snitt)`;
+  });
 
   // EC-04 Finn-søk linje
   const finnSokLine = forErp
@@ -677,6 +695,8 @@ function formatEvalCard(p, forErp = false) {
     finnSokLine,
     compLines,
     `   Snitt: ${snitt.toLocaleString('nb-NO')} kr`,
+    ankerNote,
+    ...(forkastetLines.length > 0 ? ['', 'FORKASTET', ...forkastetLines] : []),
     '',
     'AI KOMMENTAR',
     `   ${p.anchor.reason}`,
@@ -923,7 +943,7 @@ async function pollTelegramCommands(cache) {
 
         if (text === '/run') {
           log('/run mottatt');
-          await sendTelegram('▶️ Kjoring startet...');
+          await sendTelegram(`▶️ Kjoring startet... (${VERSION})`);
           runOnce(cache, true);
         }
 
