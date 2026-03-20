@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.n
+// peasy-auto.js v18.03.r
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -16,7 +16,7 @@
 //   checkFinnListing() — sjekker om bilen er pa Finn
 //   checkBrreg()       — heftelsessjekk via Playwright
 //   writeToERP()       — PUT med alle EC-24 felter
-//   postToChat()       — POST til intern kommentar, kun 1 gang
+//   postToChat()       — POST til chat-boble, kun 1 gang
 //   sendTelegram()     — sender eval-kort
 //   checkTeslaPrices() — Tesla prisovervaking (aktiv ut mars 2026)
 // ============================================================
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.p';
+const VERSION = 'v18.03.r';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -130,45 +130,6 @@ async function getListe3() {
   return biler;
 }
 
-// ERP: Hent liste 2
-async function getListe2() {
-  const token = await getErpToken();
-  const res = await fetch(
-    `${CONFIG.erp.base}/c2b_module/driveno/processing/estimating_ar_temp?per_page=100`,
-    { headers: authH(token) }
-  );
-  const data = await res.json();
-  const biler = data.data?.data?.data || [];
-  log(`ERP: ${biler.length} biler pa liste 2`);
-  return biler;
-}
-
-// ERP: Flytt bil fra liste 2 til liste 3 via Playwright
-async function promoteToListe3(erpId, page) {
-  log(`Liste 2: promoterer bil ${erpId}...`);
-  try {
-    await page.goto(
-      `https://biladministrasjon.no/cars_driveno/processing/estimating_temp/${erpId}`,
-      { waitUntil: 'networkidle', timeout: 20000 }
-    );
-    await page.waitForTimeout(2000);
-    const allInputs = await page.$('input[type="number"]');
-    const ids = await Promise.all(allInputs.map(i => i.getAttribute('id')));
-    const tempInputs = allInputs.filter((_, i) => ids[i] === 'price_temp_min');
-    if (tempInputs.length >= 2) {
-      await tempInputs[0].fill('1');
-      await tempInputs[1].fill('1');
-    }
-    await page.click('button:has-text("endre status")');
-    await page.waitForTimeout(3000);
-    log(`Liste 2: bil ${erpId} promotert OK`);
-    return true;
-  } catch (err) {
-    logErr(`promoteToListe3 ${erpId}`, err);
-    return false;
-  }
-}
-
 // ── ERP: Hent bildetaljer ─────────────────────────────────────
 async function getErpCarDetail(erpId, token) {
   const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}`, {
@@ -178,113 +139,58 @@ async function getErpCarDetail(erpId, token) {
   return data.data?.car || null;
 }
 
-// ── ERP: Fyll inn felt via Playwright UI ──────────────────────
-async function fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg) {
-  log(`ERP UI: oppdaterer bil ${erpId}...`);
-  let browser;
-  try {
-    browser = await chromium.launch({
-      headless: false,
-      args: ['--no-sandbox', '--disable-dev-shm-usage']
-    });
-    const context = await browser.newContext();
-    const page = await context.newPage();
+// ── ERP: Skriv til ERP (EC-24) ────────────────────────────────
+async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, token) {
+  log(`ERP: PUT bil ${erpId}...`);
+  const today = new Date().toISOString().substring(0, 10);
 
-    // Logg inn
-    await page.goto('https://biladministrasjon.no/login', { waitUntil: 'networkidle', timeout: 20000 });
-    await page.fill('input[name="email"]', process.env.ERP_USER);
-    await page.fill('input[name="password"]', process.env.ERP_PASS);
-    await page.click('button[type="submit"]');
-    await page.waitForURL('**/dashboard**', { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(2000);
-    log('ERP UI: innlogget');
+  const payload = {
+    price_final_min: dLav,
+    price_final_max: dHoy,
+    auction_price_type_id: auctionTypeId,
+    encumbrance: { checkmark: true, any_debts: anyDebts },
+    owners_check_date: today,
+    owners_is_checked: true,
+  };
+  if (anyDebts) payload.finance = { has_finance: true };
 
-    // Naviger til bilen
-    await page.goto(`https://biladministrasjon.no/cars_driveno/processing/estimating_final/${erpId}`, {
-      waitUntil: 'networkidle', timeout: 20000
-    });
-    await page.waitForTimeout(2000);
-
-    // Auction type
-    await page.selectOption('#auction_price_type_id', String(auctionTypeId));
-    await page.waitForTimeout(500);
-
-    // Heftelser kontrollert (alltid på)
-    const encumbrance = page.locator('#encumbrances');
-    if (!await encumbrance.isChecked()) {
-      await encumbrance.click();
-      await page.waitForTimeout(500);
-    }
-
-    // Finans kun hvis heftelser
-    if (anyDebts) {
-      const anyDebtsEl = page.locator('#encumbrances_any_debts');
-      if (!await anyDebtsEl.isChecked()) {
-        await anyDebtsEl.click();
-        await page.waitForTimeout(500);
-      }
-    }
-
-    // Eiere sjekket (alltid på)
-    const owners = page.locator('#owners\\.checked_hint');
-    if (!await owners.isChecked()) {
-      await owners.click();
-      await page.waitForTimeout(500);
-    }
-
-    // Lagre data
-    await page.click('button.btn-primary:has-text("Lagre data")');
-    await page.waitForTimeout(2000);
-
-    log(`ERP UI: bil ${erpId} lagret OK`);
-    return true;
-  } catch (err) {
-    logErr(`fillErpViaBrowser ${erpId}`, err);
-    return false;
-  } finally {
-    if (browser) { try { await browser.close(); } catch (e) {} }
-  }
-}
-
-// ── ERP: Skriv D lav/høy via API + fyll UI via Playwright ─────
-async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, brreg, token) {
-  log(`ERP: PUT D lav/hoy for bil ${erpId}...`);
-  const payload = { price_final_min: dLav, price_final_max: dHoy };
   const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}`, {
     method: 'PUT',
     headers: { ...authH(token), 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const data = await res.json();
-  if (!data.success) { logErr(`writeToERP PUT ${erpId}`, data); return false; }
-  log(`ERP: D lav/hoy OK`);
-  return await fillErpViaBrowser(erpId, auctionTypeId, anyDebts, brreg);
+
+  if (data.success) {
+    log(`ERP: bil ${erpId} OK (dLav=${dLav}, dHoy=${dHoy}, type=${auctionTypeId})`);
+    return true;
+  }
+  logErr(`writeToERP ${erpId}`, data);
+  return false;
 }
 
-// ── ERP: Post eval-kort til intern kommentar (kun 1 gang) ─────
+// ── ERP: Post til chat-boble (kun 1 gang) ─────────────────────
 async function postToChat(erpId, evalText, token) {
-  // Sjekk eksisterende kommentarer
-  const checkRes = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}/comments/all`, {
+  const checkRes = await fetch(`${CONFIG.erp.base}/chat/peasy_car/${erpId}`, {
     headers: authH(token),
   });
   const checkData = await checkRes.json();
-  const existing = Array.isArray(checkData.data) ? checkData.data : [];
+  const existing = checkData.data || [];
 
-  // Hopp over hvis Peasy-kommentar allerede finnes
-  if (existing.some(c => (c.comment || '').includes('BIL TIL ESTIMERING'))) {
-    log(`Kommentar: bil ${erpId} har allerede eval-kort — skipper`);
+  if (existing.length > 0) {
+    log(`Chat: bil ${erpId} har ${existing.length} melding(er) — skipper`);
     return false;
   }
 
   const plain = evalText.replace(/<[^>]+>/g, '');
-  const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}/comments`, {
+  const res = await fetch(`${CONFIG.erp.base}/chat/peasy_car/${erpId}`, {
     method: 'POST',
     headers: { ...authH(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ comment: plain }),
+    body: JSON.stringify({ message: plain }),
   });
   const data = await res.json();
 
-  if (data.success) { log(`Kommentar: postet for bil ${erpId}`); return true; }
+  if (data.success) { log(`Chat: postet for bil ${erpId}`); return true; }
   logErr(`postToChat ${erpId}`, data);
   return false;
 }
@@ -352,17 +258,15 @@ function getFinnFuelCode(fuel) {
   return '1';
 }
 
-function buildFinnUrl(make, model, yearFrom, yearTo, vegData, noFuel = false, kmFrom = 0, kmTo = 0) {
+function buildFinnUrl(make, model, yearFrom, yearTo, vegData) {
   const regClass = vegData.isVarebil ? '2' : '1';
+  const fuel = getFinnFuelCode(vegData.fuel);
   const cleanMake = make
     .replace(/\s*MOTORS\s*/i, '')
     .replace(/JAGUAR LAND ROVER LIMITED/i, 'Land Rover')
     .trim();
   const q = `${cleanMake} ${model}`;
-  const fuelParam = noFuel ? '' : `&fuel=${getFinnFuelCode(vegData.fuel)}`;
-  const kmFromParam = kmFrom > 0 ? `&mileage_from=${kmFrom}` : '';
-  const kmToParam = kmTo > 0 ? `&mileage_to=${kmTo}` : '';
-  return `https://www.finn.no/mobility/search/car?sales_form=1&registration_class=${regClass}&q=${encodeURIComponent(q)}${fuelParam}&year_from=${yearFrom}&year_to=${yearTo}&price_from=15000&sort=PRICE_ASC${kmFromParam}${kmToParam}`;
+  return `https://www.finn.no/mobility/search/car?sales_form=1&registration_class=${regClass}&q=${encodeURIComponent(q)}&fuel=${fuel}&year_from=${yearFrom}&year_to=${yearTo}&sort=MILEAGE_ASC`;
 }
 
 async function scrapeFinnUrl(url, page) {
@@ -403,41 +307,25 @@ async function getFinnComps(bil, vegData, page) {
   const yFrom = yBase;
   const yTo = vegData.firstRegMonth >= 9 ? yBase + 1 : yBase;
 
-  const bands = [30000, 50000, 80000, 150000];
-
-  // Steg 1: søk med fuel-filter og km-band
-  const urlVariants = bands.slice(0, 3).map((band, i) => {
-    const yr = i === 0 ? [yFrom, yTo] : i === 1 ? [yFrom - 1, yTo + 1] : [yFrom - 2, yTo + 2];
-    const kmFrom = Math.max(0, bil.mileage - band);
-    const kmTo = bil.mileage + band;
-    return buildFinnUrl(vegData.make, bil.model_series || '', yr[0], yr[1], vegData, false, kmFrom, kmTo);
-  });
-
-  // Steg 2: ingen fuel-filter hvis 0 treff
-  const noFuelVariants = bands.slice(0, 3).map((band, i) => {
-    const yr = i === 0 ? [yFrom, yTo] : i === 1 ? [yFrom - 1, yTo + 1] : [yFrom - 2, yTo + 2];
-    const kmFrom = Math.max(0, bil.mileage - band);
-    const kmTo = bil.mileage + band;
-    return buildFinnUrl(vegData.make, bil.model_series || '', yr[0], yr[1], vegData, true, kmFrom, kmTo);
-  });
+  const urlVariants = [
+    buildFinnUrl(vegData.make, bil.model_series || '', yFrom,     yTo,     vegData),
+    buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 1, yTo + 1, vegData),
+    buildFinnUrl(vegData.make, bil.model_series || '', yFrom - 2, yTo + 2, vegData),
+  ];
 
   const seen = new Set();
   let allComps = [];
   let totalCount = 0;
   let finnUrl = urlVariants[0];
 
-  for (const variants of [urlVariants, noFuelVariants]) {
-    for (const url of variants) {
-      const { comps, totalCount: tc } = await scrapeFinnUrl(url, page);
-      if (tc > totalCount) { totalCount = tc; finnUrl = url; }
-      for (const c of comps) {
-        const key = `${c.price}-${c.km}`;
-        if (!seen.has(key) && c.km <= 500000) { seen.add(key); allComps.push(c); }
-      }
-      if (allComps.length >= 10) break;
+  for (const url of urlVariants) {
+    const { comps, totalCount: tc } = await scrapeFinnUrl(url, page);
+    if (tc > totalCount) { totalCount = tc; finnUrl = url; }
+    for (const c of comps) {
+      const key = `${c.price}-${c.km}`;
+      if (!seen.has(key) && c.km <= 500000) { seen.add(key); allComps.push(c); }
     }
-    if (allComps.length > 0) break; // fant noe — ikke prøv no-fuel
-    log('Finn: 0 treff med fuel-filter — prover uten fuel');
+    if (allComps.length >= 10) break;
   }
 
   // Km-filter
@@ -494,35 +382,34 @@ async function checkBrreg(regnr, page) {
 // ── AI-anker ──────────────────────────────────────────────────
 async function getAnchor(pool, bil, vegData) {
   const top5 = pool.slice(0, 5);
-
-  // Filtrer ut prisuliggere — biler under 40% av snitt er trolig skrap/feil data
-  const snitt = top5.reduce((s, c) => s + c.price, 0) / top5.length;
-  const filtered = top5.filter(c => c.price >= snitt * 0.4);
-  const working = filtered.length >= 2 ? filtered : top5; // fallback hvis for få igjen
   const hk = Math.round((vegData.kw || 0) * 1.36);
-  const listings = working.map((c, i) =>
+
+  // Matematisk anker: snitt av 3 billigste (eller færre hvis pool < 3)
+  const nAvg = Math.min(3, top5.length);
+  const cheapest = top5.slice(0, nAvg);
+  const anchorPrice = Math.round(cheapest.reduce((s, c) => s + c.price, 0) / nAvg / 1000) * 1000;
+  // Representant-bil: nærmeste pris til snittet (for km/år i eval-kort)
+  const anchorCar = cheapest.reduce((best, c) =>
+    Math.abs(c.price - anchorPrice) < Math.abs(best.price - anchorPrice) ? c : best
+  , cheapest[0]);
+  const anchorIndex = top5.indexOf(anchorCar);
+
+  log(`Anker: snitt av ${nAvg} billigste = ${anchorPrice} kr`);
+
+  // Haiku kommenterer — bestemmer ikke pris
+  const listings = top5.map((c, i) =>
     `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`
   ).join('\n');
 
   const prompt = `Du er bruktbilekspert i Norge for Peasy (C2B auksjon).
 Bilen som prises: ${bil.model_year || ''} ${vegData.make} ${bil.model_series || ''}, ${(bil.mileage || 0).toLocaleString('nb-NO')} km, ${vegData.fuel}, ${hk} hk
 
-Sammenlignbare biler fra Finn (sortert billigst):
+Sammenlignbare biler (sortert billigst):
 ${listings}
 
-Vurder HVER bil og velg billigste reelle alternativ som anker.
-En reell bil må ha:
-- Pris som er realistisk for modellen (ikke under 30% av snitt i listen)
-- Årstall som stemmer (ikke fremtidig årstall)
-- Km som er realistisk for en bruktbil
-
-Svar KUN med JSON:
-{
-  "index": N,
-  "price": PRIS,
-  "reason": "Valgte bil N fordi [begrunnelse]. [Forkastede biler og hvorfor].",
-  "rejected": ["Bil X: [grunn]", "Bil Y: [grunn]"]
-}`;
+Ankerpris er matematisk satt til snitt av de ${nAvg} billigste: ${anchorPrice.toLocaleString('nb-NO')} kr.
+Kommenter kort (1-2 setninger pa norsk) om dette virker representativt, og nevn eventuelle avvikende biler.
+Svar KUN med JSON: {"reason": "kommentar pa norsk"}`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -541,21 +428,12 @@ Svar KUN med JSON:
     const data = await res.json();
     const text = data.content?.[0]?.text || '';
     const json = JSON.parse(text.replace(/```json|```/g, '').trim());
-    const chosen = working[json.index - 1] || working[0];
 
-    const lowestPrice = Math.min(...working.map(c => c.price));
-    const anchorPrice = Math.min(chosen.price, lowestPrice);
-    const anchorIndex = top5.findIndex(c => c.price === anchorPrice);
-
-    // Bygg full refleksjon for eval-kortet
-    const rejected = json.rejected?.length ? '\nForkastet: ' + json.rejected.join(' | ') : '';
-    const fullReason = json.reason + rejected;
-
-    log(`Haiku: anker = ${anchorPrice} kr | ${json.reason}`);
-    return { price: anchorPrice, index: anchorIndex >= 0 ? anchorIndex : 0, reason: fullReason, car: top5[anchorIndex >= 0 ? anchorIndex : 0] };
+    log(`Haiku: ${json.reason}`);
+    return { price: anchorPrice, index: anchorIndex, reason: json.reason, car: anchorCar };
   } catch (e) {
     logErr('getAnchor', e);
-    return { price: working[0].price, index: 0, reason: 'Billigste i pool (AI fallback)', car: working[0] };
+    return { price: anchorPrice, index: anchorIndex, reason: `Snitt av ${nAvg} billigste (AI fallback)`, car: anchorCar };
   }
 }
 
@@ -605,7 +483,7 @@ function calcValuation(anchorPrice) {
 }
 
 // ── Formater eval-kort ────────────────────────────────────────
-function formatEvalCard(p) {
+function formatEvalCard(p, forErp = false) {
   const source = (p.bil.source || '').toLowerCase() === 'driveno' ? 'DRIVE' : 'PEASY';
   const qaTag = p.qaOverride ? ' ⚡ QA OVERRIDE' : '';
   const isEl = p.vegData.fuel.toLowerCase().includes('elektr');
@@ -617,40 +495,46 @@ function formatEvalCard(p) {
   const compLines = top5.map((c, i) => {
     const isAnker = i === p.anchor.index;
     const line = `${i + 1}. ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year}`;
-    return isAnker ? `<b>▶ ${line} ← anker</b>` : `   ${line}`;
+    return isAnker
+      ? (forErp ? `▶ ${line} <- anker` : `<b>▶ ${line} ← anker</b>`)
+      : `   ${line}`;
   }).join('\n');
   const snitt = Math.round(top5.reduce((s, c) => s + c.price, 0) / top5.length);
 
-  // EC-17/18
+  // EC-04 — Finn-søk lenke
+  const finnSokLine = forErp
+    ? `FINN-SOK ${p.vegData.fuel} | ${p.bil.model_year || ''} | ${p.totalCount} treff\n   ${p.finnUrl}`
+    : `FINN-SOK ${p.vegData.fuel} | ${p.bil.model_year || ''} | ${p.totalCount} treff | <a href="${p.finnUrl}">Apne sok</a>`;
+
+  // EC-17/18 — Finn-annonse
   let finnAnnonse;
   if (p.finnListing) {
     const d = p.finnListing.price - p.anchor.price;
     const diffStr = d <= 0
       ? `${Math.abs(d).toLocaleString('nb-NO')} kr under anker`
       : `${d.toLocaleString('nb-NO')} kr over anker`;
-    finnAnnonse = `<a href="${p.finnListing.url}">${p.finnListing.price.toLocaleString('nb-NO')} kr</a> (${diffStr})`;
+    finnAnnonse = forErp
+      ? `${p.finnListing.price.toLocaleString('nb-NO')} kr (${diffStr})\n   ${p.finnListing.url}`
+      : `<a href="${p.finnListing.url}">${p.finnListing.price.toLocaleString('nb-NO')} kr</a> (${diffStr})`;
   } else {
     finnAnnonse = 'Ikke funnet pa Finn';
   }
 
   // EC-24
   const erpLines = [
-    p.erpWritten ? '✅ D lav/hoy skrevet' : '❌ D lav/hoy FEILET',
-    p.erpWritten ? `✅ Auction type: ${p.valuation.auctionTypeId === 2 ? '2 Lower price (≤35k)' : '1 Regular (>35k)'}` : '❌ Auction type ikke satt',
-    p.erpWritten ? '✅ Heftelser kontrollert' : '❌ Heftelser ikke toglet',
-    p.brreg.anyDebts
-      ? (p.erpWritten ? '✅ Finans? satt (heftelser funnet)' : '❌ Finans? ikke satt')
-      : '— Finans? ikke aktuelt',
-    p.erpWritten ? '✅ Eiere sjekket' : '❌ Eiere ikke toglet',
-    p.erpWritten ? '✅ Lagre data klikket' : '❌ Lagre data ikke klikket',
+    p.erpWritten ? '✅ D lav/hoy skrevet' : '❌ ERP-skriving feilet',
+    `✅ Auction type: ${p.valuation.auctionTypeId === 2 ? '2 Lower price (≤35k)' : '1 Regular (>35k)'}`,
+    '✅ Heftelser kontrollert (alltid)',
+    p.brreg.anyDebts ? '✅ Finans? satt (heftelser funnet)' : '— Finans? ikke satt',
+    '✅ Eiere sjekket (alltid)',
     p.chatPosted ? '✅ Eval-kort postet til kommentar' : '— Kommentar: allerede postet',
   ].join('\n');
 
-  return [
-    `<b>${source} BIL TIL ESTIMERING${qaTag}</b>`,
+  const lines = [
+    forErp ? `${source} BIL TIL ESTIMERING${qaTag}` : `<b>${source} BIL TIL ESTIMERING${qaTag}</b>`,
     `${p.bil.registration_number} | ${p.vegData.make} ${p.bil.model_series || ''} ${p.bil.model_year || ''} | ${(p.bil.mileage || 0).toLocaleString('nb-NO')} km | ${p.vegData.fuel} | ${p.vegData.gearbox} | ${p.vegData.drive} | ${hkStr}`,
     '',
-    `FINN-SOK ${p.vegData.fuel} | ${p.bil.model_year || ''} | ${p.totalCount} treff | <a href="${p.finnUrl}">Apne sok</a>`,
+    finnSokLine,
     compLines,
     `   Snitt: ${snitt.toLocaleString('nb-NO')} kr`,
     '',
@@ -662,7 +546,9 @@ function formatEvalCard(p) {
     `   12% margin:   ${p.valuation.T.toLocaleString('nb-NO')} kr${p.valuation.minMarginUsed ? ' (min 10k margin)' : ''}`,
     `   Peasy fee:   -${p.valuation.fee.toLocaleString('nb-NO')} kr`,
     `   D mid:        ${p.valuation.dMid.toLocaleString('nb-NO')} kr`,
-    `<b>   Estimert:     ${p.valuation.dLav.toLocaleString('nb-NO')} - ${p.valuation.dHoy.toLocaleString('nb-NO')} kr</b>`,
+    forErp
+      ? `   Estimert:     ${p.valuation.dLav.toLocaleString('nb-NO')} - ${p.valuation.dHoy.toLocaleString('nb-NO')} kr`
+      : `<b>   Estimert:     ${p.valuation.dLav.toLocaleString('nb-NO')} - ${p.valuation.dHoy.toLocaleString('nb-NO')} kr</b>`,
     `   Est. bud (E): ~${p.valuation.E.toLocaleString('nb-NO')} kr (${p.valuation.xPct >= 0 ? '+' : ''}${(p.valuation.xPct * 100).toFixed(1)}% fra Pulse ${p.valuation.bracket})`,
     '',
     'FINN-ANNONSE',
@@ -676,7 +562,15 @@ function formatEvalCard(p) {
     '',
     'ERP',
     erpLines,
-  ].join('\n');
+  ];
+
+  // ERP-lenke kun i Telegram-versjon
+  if (!forErp) {
+    const erpUrl = `https://biladministrasjon.no/cars_driveno/processing/estimating_final/${p.bil.id}`;
+    lines.push(`<a href="${erpUrl}">Apne i ERP</a>`);
+  }
+
+  return lines.join('\n');
 }
 
 // ── Evaluer en bil ────────────────────────────────────────────
@@ -715,7 +609,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     }
 
     if (pool.length === 0) {
-      await sendTelegram(`⚠️ ${regnr}: Ingen Finn-komper funnet\n<a href="${finnUrl}">Åpne Finn-søk</a>`);
+      await sendTelegram(`⚠️ ${regnr}: Ingen Finn-komper funnet`);
       return;
     }
 
@@ -746,10 +640,10 @@ async function evalCar(bil, page, cache, opts = {}) {
       sdComment = detail?.self_declaration?.comment || null;
     } catch (e) { logErr('getErpCarDetail', e); }
 
-    // 8. Skriv til ERP (EC-24)
+    // 8. Skriv til ERP (EC-24 steg 1-5)
     const erpWritten = await writeToERP(
       erpId, valuation.dLav, valuation.dHoy,
-      valuation.auctionTypeId, brreg.anyDebts, brreg, token
+      valuation.auctionTypeId, brreg.anyDebts, token
     );
 
     // 9. Bygg eval-kort og post til chat (EC-24 steg 6)
@@ -758,11 +652,11 @@ async function evalCar(bil, page, cache, opts = {}) {
       finnListing, brreg, valuation, sdComment,
       erpWritten, chatPosted: false, qaOverride: !!qaOverrideUrl,
     };
-    const evalText = formatEvalCard(cardParams);
+    const evalText = formatEvalCard(cardParams, true);   // plaintext for ERP-kommentar
     const chatPosted = await postToChat(erpId, evalText, token);
 
     // 10. Send Telegram med oppdatert chatPosted-status
-    await sendTelegram(formatEvalCard({ ...cardParams, chatPosted }));
+    await sendTelegram(formatEvalCard({ ...cardParams, chatPosted }));        // HTML for Telegram
 
     // 11. Cache
     if (erpWritten) addToCache(cache, erpId);
@@ -848,18 +742,6 @@ async function runOnce(cache, force = false) {
     browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
     const page = await browser.newPage();
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'nb-NO,nb;q=0.9' });
-
-    // Sjekk liste 2 og promoter til liste 3
-    const liste2 = await getListe2();
-    if (liste2.length > 0) {
-      log(`Liste 2: ${liste2.length} biler klar`);
-      for (const bil of liste2) {
-        await promoteToListe3(bil.id, page);
-        await new Promise(r => setTimeout(r, 2000));
-      }
-      const ny = await getListe3();
-      for (const b of ny) { if (!biler.find(x => x.id === b.id)) biler.push(b); }
-    }
 
     for (const bil of biler) {
       await evalCar(bil, page, cache);
