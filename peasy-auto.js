@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.v
+// peasy-auto.js v18.03.w
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.v';
+const VERSION = 'v18.03.w';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -934,6 +934,16 @@ async function pollTelegramCommands(cache) {
             `Cache: ${Object.keys(cache).length} biler\n` +
             `Tidspunkt: ${new Date().toLocaleTimeString('nb-NO')}`
           );
+        }
+
+        if (text === '/monitor') {
+          log('/monitor mottatt');
+          sendTelegram('🔍 Kjorer monitor...');
+          const { exec } = require('child_process');
+          exec('/Library/Developer/CommandLineTools/usr/bin/python3 /Users/bot/kartverket-monitor/kartverket-monitor.py', (err) => {
+            if (err) sendTelegram('❌ Monitor feil: ' + err.message.slice(0, 200));
+            else sendTelegram('✅ Monitor kjort');
+          });
         }
 
         if (text.startsWith('/finn ')) {
