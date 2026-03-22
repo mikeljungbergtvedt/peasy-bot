@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.aa
+// peasy-auto.js v18.03.ab
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.aa';
+const VERSION = 'v18.03.ab';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -343,6 +343,7 @@ async function getVegvesenData(regnr) {
   const generelt = td?.generelt;
   const firstRegStr = k.godkjenning?.forstegangsGodkjenning?.forstegangRegistrertDato || '';
   const firstRegMonth = firstRegStr ? parseInt(firstRegStr.split('-')[1] || '0') : 0;
+  const firstRegYear  = firstRegStr ? parseInt(firstRegStr.split('-')[0] || '0') : 0;
   const kw = drivstoff?.maksNettoEffekt || drivstoff?.maksEffektPrTime || 0;
 
   return {
@@ -357,6 +358,7 @@ async function getVegvesenData(regnr) {
     isVarebil: k?.godkjenning?.tekniskGodkjenning?.kjoretoyklassifisering
       ?.tekniskKode?.kodeBeskrivelse?.toLowerCase().includes('varebil') || false,
     firstRegMonth,
+    firstRegYear,
   };
 }
 
@@ -429,7 +431,14 @@ async function scrapeFinnUrl(url, page) {
 }
 
 async function getFinnComps(bil, vegData, page) {
-  const yBase = bil.model_year || 0;
+  // Årsmodell-validering: hvis ERP-år avviker > 2 år fra Vegvesens registreringsår, bruk Vegvesens år
+  const erpYear = bil.model_year || 0;
+  const vegYear = vegData.firstRegYear || 0;
+  let yBase = erpYear;
+  if (vegYear > 0 && erpYear > 0 && Math.abs(erpYear - vegYear) > 2) {
+    log(`Årsmodell: ERP=${erpYear} avviker fra Vegvesen=${vegYear} — bruker Vegvesen-år`);
+    yBase = vegYear;
+  }
   const yFrom = yBase;
   const yTo = vegData.firstRegMonth >= 9 ? yBase + 1 : yBase;
 
@@ -631,8 +640,14 @@ function calcValuation(anchorPrice) {
   const fee = feeEntry.fee;
 
   const dMid = T - fee;
-  const dLav = Math.round(dMid * 0.95 / 1000) * 1000;
-  const dHoy = Math.round(dMid * 1.05 / 1000) * 1000;
+  // Spread-logikk: fast minimum basert på D lav-bracket
+  const dLavRaw = Math.round(dMid * 0.95 / 1000) * 1000;
+  let spread;
+  if (dLavRaw < 30000)       spread = 2500;   // < 30k: ±2 500 kr
+  else if (dLavRaw < 100000) spread = 5000;   // 30k–100k: ±5 000 kr
+  else                       spread = Math.round(dMid * 0.05 / 1000) * 1000; // > 100k: 5%
+  const dLav = Math.round((dMid - spread) / 1000) * 1000;
+  const dHoy = Math.round((dMid + spread) / 1000) * 1000;
 
   const { xPct, bracket } = getRecX(dMid);
   const E = Math.round(dLav * (1 + xPct) / 1000) * 1000;
@@ -800,9 +815,9 @@ async function evalCar(bil, page, cache, opts = {}) {
     const anchor = await getAnchor(pool, bil, vegData);
 
     // Finn < pool-anker → bruk Finn-pris
-    const lowestPool = Math.min(...pool.map(c => c.price));
-    if (finnListing && finnListing.price < lowestPool) {
-      log(`Finn-pris (${finnListing.price}) < pool-anker (${lowestPool}) → bruker Finn som anker`);
+    // Finn-pris < anker → bruk som nytt anker (anker kan aldri være høyere enn bilen er annonsert for)
+    if (finnListing && finnListing.price < anchor.price) {
+      log(`Finn-pris (${finnListing.price}) < anker (${anchor.price}) → bruker Finn som anker`);
       anchor.price = finnListing.price;
     }
 
