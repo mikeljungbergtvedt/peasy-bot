@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.ab
+// peasy-auto.js v18.03.ac
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.ab';
+const VERSION = 'v18.03.ac';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -540,11 +540,23 @@ async function checkBrreg(regnr, page) {
 async function getAnchor(pool, bil, vegData) {
   const top5 = pool.slice(0, 5);
 
-  // Outlier-filter: forkast biler med mer enn 20% avvik fra snitt
-  const snittAll = top5.reduce((s, c) => s + c.price, 0) / top5.length;
-  const outliers = top5.filter(c => c.price < snittAll * 0.80);
-  const working = top5.filter(c => c.price >= snittAll * 0.80);
-  const safeWorking = working.length >= 2 ? working : top5;
+  // Km-avvik filter: ekskluder biler med > 50 000 km avvik fra bilen som prises
+  const bilKm = bil.mileage || 0;
+  const kmFiltered = top5.filter(c => Math.abs(c.km - bilKm) <= 50000);
+  const kmPool = kmFiltered.length >= 2 ? kmFiltered : top5;
+
+  // Outlier-filter: forkast biler med mer enn 20% prisavvik fra snitt
+  const snittAll = kmPool.reduce((s, c) => s + c.price, 0) / kmPool.length;
+  const kmOutliers = top5.filter(c => Math.abs(c.km - bilKm) > 50000)
+    .map(c => ({ ...c, reason: `${Math.round(Math.abs(c.km - bilKm)/1000)}k km avvik` }));
+  const priceOutliers = kmPool.filter(c => c.price < snittAll * 0.80)
+    .map(c => ({ ...c, reason: `${Math.round((1 - c.price/snittAll)*100)}% under snitt` }));
+  // Dedup: en bil kan bare havne i én kategori
+  const kmOutlierKeys = new Set(kmOutliers.map(c => `${c.price}-${c.km}`));
+  const outliers = [...kmOutliers, ...priceOutliers.filter(c => !kmOutlierKeys.has(`${c.price}-${c.km}`))];
+  const priceFiltered = kmPool.filter(c => c.price >= snittAll * 0.80);
+  const working = priceFiltered;
+  const safeWorking = working.length >= 2 ? working : kmPool;
 
   // Matematisk anker: snitt av 3 billigste etter filter (eller færre)
   const nAvg = Math.min(3, safeWorking.length);
@@ -675,15 +687,15 @@ function formatEvalCard(p, forErp = false) {
     return isAnker ? `<b>▶ ${line}</b>` : `   ${line}`;
   }).join('\n');
   const snitt = Math.round(top5.reduce((s, c) => s + c.price, 0) / top5.length);
-  const ankerNote = `   (Anker = snitt av ▶-merkede biler: ${p.anchor.price.toLocaleString('nb-NO')} kr)`;
+  const anchorCars = top5.filter((_, i) => anchorIndices.includes(i));
+  const anchorAvgKm = anchorCars.length > 0 ? Math.round(anchorCars.reduce((s,c)=>s+c.km,0)/anchorCars.length) : 0;
+  const ankerNote = `   (Anker = snitt av ▶-merkede biler: ${p.anchor.price.toLocaleString('nb-NO')} kr | snitt ${anchorAvgKm.toLocaleString('nb-NO')} km)`;
 
   // FORKASTET-seksjon
   const outliers = p.anchor.outliers || [];
-  const snittAll = top5.reduce((s, c) => s + c.price, 0) / top5.length;
-  const forkastetLines = outliers.map(c => {
-    const avvik = Math.round((1 - c.price / snittAll) * 100);
-    return `   ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year} (${avvik}% under snitt)`;
-  });
+  const forkastetLines = outliers.map(c =>
+    `   ${c.price.toLocaleString('nb-NO')} kr | ${c.km.toLocaleString('nb-NO')} km | ${c.year} (${c.reason})`
+  );
 
   // EC-04 Finn-søk linje
   const finnSokLine = forErp
@@ -731,7 +743,7 @@ function formatEvalCard(p, forErp = false) {
     '',
     finnSokLine,
     compLines,
-    `   Snitt: ${snitt.toLocaleString('nb-NO')} kr`,
+    `   Snitt: ${snitt.toLocaleString('nb-NO')} kr | ${Math.round(top5.reduce((s,c)=>s+c.km,0)/top5.length).toLocaleString('nb-NO')} km (pool snitt)`,
     ankerNote,
     ...(forkastetLines.length > 0 ? ['', 'FORKASTET', ...forkastetLines] : []),
     '',
