@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.ad
+// peasy-auto.js v18.03.ae
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -673,7 +673,7 @@ function calcValuation(anchorPrice) {
   const auctionTypeId = dLav <= 35000 ? 2 : 1;
 
   log(`Kalkyle: anker=${anchorPrice} T=${T} fee=${fee} dMid=${dMid} dLav=${dLav} dHoy=${dHoy} E=${E} (${bracket} ${(xPct * 100).toFixed(1)}%)`);
-  return { T, t88: T, minMarginUsed, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId };
+  return { T, t88: T, minMarginUsed, margin, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId };
 }
 
 // ── Formater eval-kort ────────────────────────────────────────
@@ -759,7 +759,7 @@ function formatEvalCard(p, forErp = false) {
     '',
     'KALKYLE',
     `   Anker:        ${p.anchor.price.toLocaleString('nb-NO')} kr`,
-    `   12% margin:   ${p.valuation.T.toLocaleString('nb-NO')} kr${p.valuation.minMarginUsed ? ' (min 10k margin)' : ''}`,
+    `   Margin (${p.valuation.margin ? p.valuation.margin.toLocaleString('nb-NO') : '?'} kr): ${p.valuation.T.toLocaleString('nb-NO')} kr`,
     `   Peasy fee:   -${p.valuation.fee.toLocaleString('nb-NO')} kr`,
     `   D mid:        ${p.valuation.dMid.toLocaleString('nb-NO')} kr`,
     estimert,
