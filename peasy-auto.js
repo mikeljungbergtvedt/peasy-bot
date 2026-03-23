@@ -1,5 +1,5 @@
 // ============================================================
-// peasy-auto.js v18.03.ac
+// peasy-auto.js v18.03.ad
 // Peasy C2B Bruktbil — Automatisk evaluering
 //
 // Kjorer: Liste 3 (estimating_ar_final), 1x per time 07-17
@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.ac';
+const VERSION = 'v18.03.ad';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -641,12 +641,19 @@ function getRecX(dMid) {
   return               { xPct: b?.premium ?? CONFIG.pdec1.premium, bracket: 'Premium' };
 }
 
-// ── Prisformel — uendret fra v18.03.p ────────────────────────
+// ── Prisformel — v18.03.ad: 12% med min/maks per bracket ─────
 function calcValuation(anchorPrice) {
-  const t88 = Math.round(anchorPrice * 0.88 / 1000) * 1000;
-  const tFloor = anchorPrice - 10000;
-  const T = (anchorPrice * 0.12 >= 10000) ? t88 : tFloor;
-  const minMarginUsed = T === tFloor;
+  // Margin: 12% av anker, begrenset av min og maks per bracket
+  const MARGIN_TABLE = [
+    { maxAnker: 100000,   min:  8000, maks: 12000 },  // Lav
+    { maxAnker: 250000,   min: 12000, maks: 22000 },  // Mid
+    { maxAnker: 400000,   min: 22000, maks: 35000 },  // Høy
+    { maxAnker: Infinity, min: 35000, maks: 50000 },  // Premium
+  ];
+  const mb = MARGIN_TABLE.find(b => anchorPrice <= b.maxAnker);
+  const margin = Math.min(mb.maks, Math.max(mb.min, Math.round(anchorPrice * 0.12 / 1000) * 1000));
+  const T = anchorPrice - margin;
+  const minMarginUsed = false;
 
   const feeEntry = CONFIG.fee.find(f => T < f.maxT);
   const fee = feeEntry.fee;
@@ -666,7 +673,7 @@ function calcValuation(anchorPrice) {
   const auctionTypeId = dLav <= 35000 ? 2 : 1;
 
   log(`Kalkyle: anker=${anchorPrice} T=${T} fee=${fee} dMid=${dMid} dLav=${dLav} dHoy=${dHoy} E=${E} (${bracket} ${(xPct * 100).toFixed(1)}%)`);
-  return { T, t88, minMarginUsed, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId };
+  return { T, t88: T, minMarginUsed, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId };
 }
 
 // ── Formater eval-kort ────────────────────────────────────────
