@@ -28,7 +28,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const VERSION = 'v18.03.ad';
+const VERSION = 'v18.03.ae';
 const CACHE_FILE = path.join(__dirname, 'peasy-cache.json');
 const TESLA_CACHE_FILE = path.join(__dirname, 'tesla-prices.json');
 const LOCK_FILE = '/tmp/peasy.lock';
@@ -673,7 +673,7 @@ function calcValuation(anchorPrice) {
   const auctionTypeId = dLav <= 35000 ? 2 : 1;
 
   log(`Kalkyle: anker=${anchorPrice} T=${T} fee=${fee} dMid=${dMid} dLav=${dLav} dHoy=${dHoy} E=${E} (${bracket} ${(xPct * 100).toFixed(1)}%)`);
-  return { T, t88: T, minMarginUsed, margin, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId };
+  return { T, t88: T, minMarginUsed, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId };
 }
 
 // ── Formater eval-kort ────────────────────────────────────────
@@ -759,7 +759,7 @@ function formatEvalCard(p, forErp = false) {
     '',
     'KALKYLE',
     `   Anker:        ${p.anchor.price.toLocaleString('nb-NO')} kr`,
-    `   Margin (${p.valuation.margin ? p.valuation.margin.toLocaleString('nb-NO') : '?'} kr): ${p.valuation.T.toLocaleString('nb-NO')} kr`,
+    `   12% margin:   ${p.valuation.T.toLocaleString('nb-NO')} kr${p.valuation.minMarginUsed ? ' (min 10k margin)' : ''}`,
     `   Peasy fee:   -${p.valuation.fee.toLocaleString('nb-NO')} kr`,
     `   D mid:        ${p.valuation.dMid.toLocaleString('nb-NO')} kr`,
     estimert,
@@ -1057,6 +1057,70 @@ async function pollTelegramCommands(cache) {
 }
 
 // ── Start ─────────────────────────────────────────────────────
+// ── Kveldspuls kl. 19:00 ─────────────────────────────────────
+async function sendKveldspuls() {
+  log('Kveldspuls: henter data...');
+  try {
+    const XLSX = require('xlsx');
+    const res = await fetch('https://api.biladministrasjon.no/public/reports/peasy/dhqui7Hkl54?output=xlsx');
+    const buf = await res.arrayBuffer();
+    const wb = XLSX.read(Buffer.from(buf), { type: 'buffer' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+
+    function pd(v) {
+      if (!v) return null;
+      const s = String(v).trim().slice(0, 10);
+      const p = s.split('.');
+      if (p.length === 3) return new Date(p[2] + '-' + p[1] + '-' + p[0]);
+      return null;
+    }
+
+    const all = rows.slice(1).filter(r => r[1]);
+
+    const evalToday    = all.filter(r => { const d = pd(r[13]); return d && d >= today; }).length;
+    const avvistToday  = all.filter(r => { const d = pd(r[13]); return d && d >= today && String(r[12] || '').toLowerCase().includes('avvist by customer'); }).length;
+    const bestiltToday = all.filter(r => { const d = pd(r[15]) || pd(r[16]); return d && d >= today; }).length;
+    const mottattToday = all.filter(r => { const d = pd(r[17]); return d && d >= today; }).length;
+    const solgtToday   = all.filter(r => { const d = pd(r[18]); return d && d >= today; }).length;
+    const retToday     = all.filter(r => { const d = pd(r[21]); return d && d >= today; }).length;
+
+    const d7 = new Date(today); d7.setDate(d7.getDate() - 7);
+    const eval7   = all.filter(r => { const d = pd(r[13]); return d && d >= d7; });
+    const aksept7 = eval7.filter(r => (r[15] && String(r[15]).trim()) || (r[16] && String(r[16]).trim()));
+    const solgt7  = all.filter(r => { const d = pd(r[18]); return d && d >= d7; });
+    const ret7    = all.filter(r => { const d = pd(r[21]); return d && d >= d7; });
+    const done7   = solgt7.length + ret7.length;
+    const ep7     = eval7.length > 0 ? Math.round(aksept7.length / eval7.length * 100) : 0;
+    const bp7     = done7 > 0 ? Math.round(solgt7.length / done7 * 100) : 0;
+
+    const ep7ikon = ep7 >= 20 ? '✅' : ep7 >= 15 ? '🟡' : '🔴';
+    const bp7ikon = bp7 >= 70 ? '✅' : bp7 >= 60 ? '🟡' : '🔴';
+
+    const dagsNavn = today.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long' });
+    const dagsNamnCap = dagsNavn.charAt(0).toUpperCase() + dagsNavn.slice(1);
+
+    const melding =
+      `📊 <b>Peasy Pulse — ${dagsNamnCap}</b>\n\n` +
+      `Evaluert:           <b>${evalToday}</b>\n` +
+      `Avvist tilbud:      <b>${avvistToday}</b>\n` +
+      `Bestilt hent/lev:   <b>${bestiltToday}</b>\n` +
+      `Mottatt på anlegg:  <b>${mottattToday}</b>\n` +
+      `Solgt på auksjon:   <b>${solgtToday}</b>\n` +
+      `Returnert:          <b>${retToday}</b>\n\n` +
+      `${ep7ikon} Eval-aksept 7d:  <b>${ep7}%</b>  (mål 20%)\n` +
+      `${bp7ikon} Bud-aksept 7d:   <b>${bp7}%</b>  (mål 70%)`;
+
+    await sendTelegram(melding);
+    log('Kveldspuls: sendt OK');
+  } catch (err) {
+    logErr('sendKveldspuls', err);
+    await sendTelegram(`❌ Kveldspuls feil: ${err.message}`);
+  }
+}
+
 async function main() {
   log(`Peasy Auto ${VERSION} starter`);
 
@@ -1076,7 +1140,11 @@ async function main() {
   pollTelegramCommands(cache);
 
   setInterval(async () => {
-    if (new Date().getMinutes() === 0) await runOnce(cache);
+    const now = new Date();
+    if (now.getMinutes() === 0) {
+      await runOnce(cache);
+      if (now.getHours() === 19) await sendKveldspuls();
+    }
   }, 60000);
 
   process.on('SIGINT', () => { log('Stopper...'); process.exit(0); });
