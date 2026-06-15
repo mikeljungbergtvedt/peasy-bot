@@ -1,0 +1,12 @@
+.env
+.env.*
+logs/
+node_modules/
+*.bak-*
+*.bak
+v2-measurements.jsonl
+state*.json
+erpState.json
+auction-seen.json
+km-cache.json
+peasy-cache.json

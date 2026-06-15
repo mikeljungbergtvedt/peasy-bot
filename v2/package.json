@@ -1,0 +1,14 @@
+{
+  "name": "peasy-pricing-v2",
+  "version": "0.2.0",
+  "description": "Shadow ankerpris-evaluering for Autoringen. Kjorer parallelt med peasy-auto.",
+  "type": "module",
+  "main": "v2-eval.js",
+  "scripts": {
+    "eval": "node v2-eval.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}
