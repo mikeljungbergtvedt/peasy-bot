@@ -46,7 +46,7 @@ const path = require('path');
 const { runV2Pricing } = require('./pricing-v2-glue');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.40';
+const VERSION = 'v20.42';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -134,7 +134,7 @@ function saveJSON(file, data) {
 // ── Cache ─────────────────────────────────────────────────────
 function isInCache(cache, erpId) { return !!cache[String(erpId)]; }
 function addToCache(cache, erpId) {
-  cache[String(erpId)] = new Date().toISOString();
+  if (erpId) { cache[String(erpId)] = new Date().toISOString(); }
   saveJSON(CACHE_FILE, cache);
   log(`Cache: ${erpId} lagt til`);
 }
@@ -963,9 +963,7 @@ function getFinnBodyType(karosseri) {
 async function getFinnComps(bil, vegData, page) {
   const erpYear = bil.model_year || 0;
   const vegYear = vegData.firstRegYear || 0;
-  const ciYear = (bil.carInfo && bil.carInfo.model_year) || 0;
   let yBase = erpYear;
-  if (ciYear > 0) { log(`Arsmodell: bruker car.info model_year=${ciYear}`); yBase = ciYear; }
   if (vegYear > 0 && erpYear > 0 && Math.abs(erpYear - vegYear) > 2) {
     log(`Arsmodell: ERP=${erpYear} avviker fra Vegvesen=${vegYear} — bruker Vegvesen-ar`);
     yBase = vegYear;
@@ -974,9 +972,10 @@ async function getFinnComps(bil, vegData, page) {
   const seg = identifySegment(yBase, bil.mileage || 0);
   log(`Segment: ${seg.label} | alder=${seg.age}y | km/y=${seg.kmPerYear?.toLocaleString('nb-NO')}`);
 
-  const MIN_POOL = 3;
-  const kmBand    = seg.kmBand || Math.max(10000, Math.round((bil.mileage||0)*0.25/1000)*1000);
-  const kmTo     = (bil.mileage || 0) + Math.min(kmBand, Math.round((bil.mileage||0)*0.05/1000)*1000);  // v19.33: cap +5% over origin
+  const MIN_POOL = 5;
+  const KM_BAND  = { premium: 30000, mid: 40000, highkm: 50000, old: 80000, special: 80000 };
+  const kmBand   = KM_BAND[seg.segment] || 50000;
+  const kmTo     = (bil.mileage || 0) + kmBand;
   const bodyType = getFinnBodyType(vegData.karosseri);
   const isHybrid = vegData.isHybrid || false;
 
@@ -988,54 +987,19 @@ async function getFinnComps(bil, vegData, page) {
   }
 
   // STEG 1: merke + modell + eksakt ar + varebil/personbil
-  let yFrom = yBase, yTo = yBase;
-  // PEASY: hybrid Steg 1 - proev pakke foerst, fall tilbake uten
-    let result;
-    if (bil.pakke) {
-      const rPkg = await fetchHits(buildFinnUrl((bil.carInfo && bil.carInfo.make) || vegData.make, (bil.carInfo && bil.carInfo.model) || bil.model_series || '', yFrom, yTo, vegData, bil.modelFull ? { fullQuery: bil.modelFull } : { package: bil.pakke }));
-      log('Finn steg 1 med pakke ' + bil.pakke + ' (' + yFrom + '-' + yTo + '): ' + rPkg.totalCount + ' treff');
-      funnelSteps.push({
-        label: (vegData.make + ' ' + (bil.model_series || '').split(' ')[0] + (bil.pakke ? ' ' + bil.pakke : '')).trim() + ' ' + yFrom + (yTo !== yFrom ? '-' + yTo : '') + ' (' + (vegData.isVarebil ? 'varebil' : 'personbil') + ')',
-        treff: rPkg.totalCount,
-        stopp: false,
-      });
-      if (rPkg.totalCount > 0) {
-        result = rPkg;
-      } else {
-        log('Steg 1 med pakke = 0, faller til uten pakke');
-        result = await fetchHits(buildFinnUrl((bil.carInfo && bil.carInfo.make) || vegData.make, (bil.carInfo && bil.carInfo.model) || bil.model_series || '', yFrom, yTo, vegData));
-        funnelSteps.push({
-          label: 'Steg 1b uten pakke: ' + vegData.make + ' ' + (bil.model_series || '') + ' ' + yFrom + (yTo !== yFrom ? '-' + yTo : ''),
-          treff: result.totalCount,
-          stopp: false,
-        });
-      }
-    } else {
-      result = await fetchHits(buildFinnUrl((bil.carInfo && bil.carInfo.make) || vegData.make, (bil.carInfo && bil.carInfo.model) || bil.model_series || '', yFrom, yTo, vegData));
-      log('Finn steg 1 (' + yFrom + '-' + yTo + '): ' + result.totalCount + ' treff');
-      funnelSteps.push({
-        label: vegData.make + ' ' + (bil.model_series || '') + ' ' + yFrom + (yTo !== yFrom ? '-' + yTo : '') + ' (' + (vegData.isVarebil ? 'varebil' : 'personbil') + ')',
-        treff: result.totalCount,
-        stopp: false,
-      });
-    }
-
-  // STEG 1c: modell-filter via sidebar
-  if (bil.model_series) {
-    const mf = await applyModelFilter(page, bil.model_series);
-    if (mf) {
-      lastGoodUrl = mf.url;
-      funnelSteps.push({ label: `+modell ${mf.modelName}`, treff: mf.totalCount, stopp: false });
-      const rf = await fetchHits(mf.url);
-      lastGoodComps = rf.comps.filter(c => c.km <= 500000);
-      totalCount = mf.totalCount;
-    }
-  }
+  let yFrom = yBase, yTo = vegData.firstRegMonth >= 9 ? yBase + 1 : yBase;
+  let result = await fetchHits(buildFinnUrl(vegData.make, bil.model_series || '', yFrom, yTo, vegData));
+  log(`Finn steg 1 (${yFrom}-${yTo}): ${result.totalCount} treff`);
+  funnelSteps.push({
+    label: `${vegData.make} ${bil.model_series || ''} ${yFrom}${yTo !== yFrom ? '–' + yTo : ''} (${vegData.isVarebil ? 'varebil' : 'personbil'})`,
+    treff: result.totalCount,
+    stopp: false,
+  });
 
   // STEG 1b: ar +-1 hvis under min
   if (result.totalCount < MIN_POOL) {
     const yFrom2 = yFrom - 1, yTo2 = yTo + 1;
-    const r2 = await fetchHits(buildFinnUrl((bil.carInfo && bil.carInfo.make) || vegData.make, (bil.carInfo && bil.carInfo.model) || bil.model_series || '', yFrom2, yTo2, vegData));
+    const r2 = await fetchHits(buildFinnUrl(vegData.make, bil.model_series || '', yFrom2, yTo2, vegData));
     log(`Finn steg 1b (+-1y ${yFrom2}-${yTo2}): ${r2.totalCount} treff`);
     funnelSteps.push({ label: `ar +-1 (${yFrom2}–${yTo2})`, treff: r2.totalCount, stopp: false });
     if (r2.totalCount > result.totalCount) {
@@ -1053,7 +1017,6 @@ async function getFinnComps(bil, vegData, page) {
   let allComps = [];
   for (const c of result.comps) {
     const key = `${c.price}-${c.km}`;
-    const modelMatch = !bil.model_series || c.heading.toLowerCase().includes(cleanModelSeries(vegData.make, bil.model_series).toLowerCase());
     if (!seen.has(key) && c.km <= 500000) { seen.add(key); allComps.push(c); }
   }
 
@@ -1069,7 +1032,7 @@ async function getFinnComps(bil, vegData, page) {
   }
 
   // Akkumuler opts — hvert steg bygger pa alle godkjente tidligere filtre
-  let activeOpts = bil.pakke ? { package: bil.pakke } : {};
+  let activeOpts = {};
 
   async function tryFilter(newOpts, stepLabel, skipReason) {
     if (skipReason) {
@@ -1078,7 +1041,7 @@ async function getFinnComps(bil, vegData, page) {
       return true;
     }
     const testOpts = Object.assign({}, activeOpts, newOpts);
-    const testUrl  = buildFinnUrl((bil.carInfo && bil.carInfo.make) || vegData.make, (bil.carInfo && bil.carInfo.model) || bil.model_series || '', yFrom, yTo, vegData, testOpts);
+    const testUrl  = buildFinnUrl(vegData.make, bil.model_series || '', yFrom, yTo, vegData, testOpts);
     const r        = await fetchHits(testUrl);
     log(`Finn steg '${stepLabel}': ${r.totalCount} treff`);
     if (r.totalCount >= MIN_POOL) {
@@ -1098,13 +1061,11 @@ async function getFinnComps(bil, vegData, page) {
 
   // 2a–2e: kjor filtre sekvensielt, stopp ved false
   await (async () => {
-    const kmFrom = Math.max(0, (bil.mileage || 0) - kmBand);
-    if (!await tryFilter({ kmTo, kmFrom }, `+km maks ${Math.round(kmTo / 1000)}k (+/-${Math.round(kmBand / 1000)}k)`, null)) return;
+    if (!await tryFilter({ kmTo }, `+km maks ${Math.round(kmTo / 1000)}k (+/-${Math.round(kmBand / 1000)}k)`, null)) return;
     if (!await tryFilter(isHybrid ? {} : { fuel: true }, `+${vegData.fuel}`, isHybrid ? 'hybrid — hopper over drivstoff' : null)) return;
     if (!await tryFilter({ drive: true }, `+${vegData.drive}`, null)) return;
     if (!await tryFilter({ body: bodyType || undefined }, `+${vegData.karosseri || 'karosseri'}`, !bodyType ? 'ingen karosseri-mapping' : null)) return;
-    if (!await tryFilter({ kw: true }, `+${vegData.kw} kW +/-15%`, null)) return;
-  await tryFilter({ gear: true }, `2f +${vegData.gearbox || 'girkasse'}`, !getFinnGearCode(vegData.gearbox) ? 'ingen gir-mapping' : null);
+    await tryFilter({ kw: true }, `+${vegData.kw} kW +/-15%`, null);
   })();
 
   // Marker siste aktive steg som stopp-punkt
@@ -1113,18 +1074,9 @@ async function getFinnComps(bil, vegData, page) {
 
   // km-proksimitet pa final pool
   let finalPool = lastGoodComps;
-  // v19.34: asymmetrisk km-filter. Ovre grense hardt kappet til kmTo (+5% over origin).
-  // Nedre grense utvides ved behov (slitte biler ok), men ALDRI over kmTo.
-  const originKm = bil.mileage || 0;
   for (const band of [kmBand, kmBand * 1.5, kmBand * 2, 999999]) {
-    const lo = Math.max(0, originKm - band);
-    const f = lastGoodComps.filter(c => c.km >= lo && c.km <= kmTo);
-    if (f.length >= 3) { finalPool = f; log(`Finn: km-band lo=${Math.round(lo/1000)}k hi=${Math.round(kmTo/1000)}k gir ${f.length} comps`); break; }
-  }
-  // Hvis selv videste band gir <3, behold de som finnes under kmTo (aldri over taket)
-  if (finalPool === lastGoodComps) {
-    finalPool = lastGoodComps.filter(c => c.km <= kmTo);
-    log(`Finn: faerre enn 3 i band, beholder ${finalPool.length} comps under kmTo=${Math.round(kmTo/1000)}k`);
+    const f = lastGoodComps.filter(c => Math.abs(c.km - (bil.mileage || 0)) <= band);
+    if (f.length >= 3) { finalPool = f; log(`Finn: km-band ${Math.round(band)} gir ${f.length} comps`); break; }
   }
   finalPool.sort((a, b) => a.price - b.price);
   log(`Finn: endelig pool = ${finalPool.length} biler | URL=${lastGoodUrl}`);
@@ -1671,7 +1623,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         { parse_mode: 'HTML' }
       );
     } catch (e) { logErr('blocker-alarm', regnr, e); }
-    try { cache[String(erpId)] = new Date().toISOString(); saveJSON(CACHE_FILE, cache); } catch (e) {}
+    try { if (erpId) { cache[String(erpId)] = new Date().toISOString(); } saveJSON(CACHE_FILE, cache); } catch (e) {}
     return true;
   }
   // === end safety valve ===
@@ -2021,8 +1973,20 @@ async function evalCar(bil, page, cache, opts = {}) {
     // 9. Verifiser ERP
     const erpVerify = await maybeVerifyErp(bil, erpId, token);
 
+    // Finn-funnel URL (samme buildFinnUrl + opts som getFinnComps-funnelen bruker)
+    const _ffKmBand = ({ premium:30000, mid:40000, highkm:50000, old:80000, special:80000 }[seg && seg.segment]) || 50000;
+    const _ffYBase  = bil.model_year || vegData.firstRegYear || 0;
+    const _ffYTo    = (vegData.firstRegMonth >= 9 ? _ffYBase + 1 : _ffYBase);
+    const finnFunnelTightUrl = buildFinnUrl(vegData.make, bil.model_series || '', _ffYBase, _ffYTo, vegData, {
+      kmTo: (bil.mileage || 0) + _ffKmBand,
+      fuel: !(vegData.isHybrid || false),
+      drive: true,
+      body: getFinnBodyType(vegData.karosseri) || undefined,
+      kw: true
+    });
     // 10. Bygg eval-kort (hybrid: Easy topp/bunn + v2 comps/anker/risiko)
     const cardParams = {
+      finnUrl: finnFunnelTightUrl,
       bil, vegData, seg, valuation, imageCount, sdComment, brreg,
       anchor: v2.anchor,
       activeComps: (v2.activeComps || []),
