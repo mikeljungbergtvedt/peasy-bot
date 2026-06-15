@@ -46,7 +46,7 @@ const path = require('path');
 const { runV2Pricing } = require('./pricing-v2-glue');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.38';
+const VERSION = 'v20.39';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1653,12 +1653,13 @@ async function evalCar(bil, page, cache, opts = {}) {
     if (o.segConfidence === 'Best effort' || o.segConfidence === 'Special') {
       blockers.push('seg_confidence_' + o.segConfidence);
     }
+    if (Number(o.dLav) < 3000) blockers.push('d_lav_under_vrakpant_' + o.dLav);
     return blockers;
   }
   async function _maybeBlock(o) {
     const blockers = _computeBlockers(o);
     if (!blockers.length) return false;
-    log('[v20.38] BLOKKERT skriving for ' + regnr + ' (' + erpId + '): ' + blockers.join(', '));
+    log('[v20.39] BLOKKERT skriving for ' + regnr + ' (' + erpId + '): ' + blockers.join(', '));
     try {
       await sendTelegram(
         '\u26A0\uFE0F <b>MANUELL VURDERING</b>\n\n' +
