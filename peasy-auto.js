@@ -1600,8 +1600,6 @@ async function evalCar(bil, page, cache, opts = {}) {
     if (euMaxKm > 0 && oppgittKm > 0 && euMaxKm > oppgittKm * 1.05) {
       blockers.push('km_konflikt_eu_' + euMaxKm + '_oppgitt_' + oppgittKm);
     }
-    const valgte = Array.isArray(o.valgteComps) ? o.valgteComps : [];
-    if (valgte.length < 3) blockers.push('kun_' + valgte.length + '_ekte_sosterbiler');
     if (o.segConfidence === 'Best effort' || o.segConfidence === 'Special') {
       blockers.push('seg_confidence_' + o.segConfidence);
     }
