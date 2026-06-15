@@ -24,7 +24,7 @@ import { buildEvalCard } from './telegram-v2.js';
 import { sendTelegram } from './telegram-bot.js';
 import { checkBrregForRegnr } from './brreg.js';
 
-const VERSION = 'peasy-bot v1.8';
+const VERSION = 'peasy-bot v1.9';
 const CACHE_FILE = '/Users/bot/peasy-pricing-v2/peasy-cache.json';
 const SCHEDULE_HOURS = { start: 7, end: 19 };
 
@@ -56,7 +56,7 @@ async function evalCar(bil, token) {
       imageCount = (car && Array.isArray(car.files)) ? car.files.length : 0;
       bodyTypeId = car?.driveNoCarData?.body_type_id || null;
     }
-    if (km <= 0) { log('SKIP: ' + regnr + ' har km=0, kan ikke prise'); /* SKIP-telegram fjernet 20260610 - kun stille log */ return; }
+    if (km <= 0) { log('SKIP: ' + regnr + ' har km=0, kan ikke prise'); /* SKIP-telegram fjernet 20260610 - kun stille log */ return 'skip'; }
     log('Detail: sdComment=' + (sdComment ? 'JA(' + sdComment.length + 'tegn)' : 'NEI') + ' imageCount=' + imageCount + ' bodyTypeId=' + bodyTypeId);
 
     // 2. v2 pipeline (car.info comps + Sonnet anker + Easy-formel pricing)
@@ -104,7 +104,7 @@ async function evalCar(bil, token) {
     const dLav = pricing.dLav;
     const dHoy = pricing.dHoy;
     const auctionTypeId = dLav < 35000 ? 2 : 1;
-    if (dLav <= 0 || dHoy <= 0) { log("SKIP ERP-write: ugyldige priser dLav=" + dLav + " dHoy=" + dHoy); try { await sendTelegram("SKIP ERP for " + regnr + ": ugyldige priser dLav=" + dLav + " dHoy=" + dHoy); } catch(e){} return; }
+    if (dLav <= 0 || dHoy <= 0) { log("SKIP ERP-write: ugyldige priser dLav=" + dLav + " dHoy=" + dHoy); try { await sendTelegram("SKIP ERP for " + regnr + ": ugyldige priser dLav=" + dLav + " dHoy=" + dHoy); } catch(e){} return 'skip'; }
     // === v1.4 PRICING SAFETY VALVE ===
     {
       const blockers = [];
@@ -136,7 +136,7 @@ async function evalCar(bil, token) {
             { parse_mode: 'HTML' }
           );
         } catch (e) { logErr('blocker-alarm', e); }
-        try { const _c = loadCache(); _c[String(erpId)] = new Date().toISOString(); saveCache(_c); } catch (e) {}
+        try { /* v1.9: ikke cache blokkerte biler */ } catch (e) {} return 'blocked';
         return;
       }
     }
@@ -155,9 +155,9 @@ async function evalCar(bil, token) {
     try { await sendTelegram(card); log('Telegram-kort sendt'); } catch(e) { logErr('sendTelegram', e); }
     log('Eval-kort postet: ' + (chatPosted ? 'OK' : 'NEI'));
 
-    log('FERDIG: ' + regnr);
+    log('FERDIG: ' + regnr); return 'ok';
   } catch (e) {
-    logErr('evalCar ' + regnr, e);
+    logErr('evalCar ' + regnr, e); return 'error';
   }
 }
 
@@ -170,9 +170,9 @@ async function runOnce() {
     log('Liste 3: ' + (liste3?.length || 0) + ' biler');
     for (const bil of (liste3 || [])) {
       if (cache[String(bil.id)]) continue;
-      await evalCar(bil, token);
+      const result = await evalCar(bil, token); if (result === 'ok') {
       cache[String(bil.id)] = new Date().toISOString();
-      saveCache(cache);
+      saveCache(cache); }
     }
   } catch (e) {
     logErr('runOnce', e);
