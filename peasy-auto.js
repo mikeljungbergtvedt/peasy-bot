@@ -46,7 +46,7 @@ const path = require('path');
 const { runV2Pricing } = require('./pricing-v2-glue');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.45';
+const VERSION = 'v20.46';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -975,7 +975,7 @@ async function getFinnComps(bil, vegData, page) {
   const MIN_POOL = 5;
   const KM_BAND  = { premium: 30000, mid: 40000, highkm: 50000, old: 80000, special: 80000 };
   const kmBand   = KM_BAND[seg.segment] || 50000;
-  const kmTo     = (bil.mileage || 0) + kmBand;
+  const kmTo     = (bil.mileage || 0) + kmBand;  const kmFrom   = Math.max(0, (bil.mileage || 0) - kmBand);
   const bodyType = getFinnBodyType(vegData.karosseri);
   const isHybrid = vegData.isHybrid || false;
 
@@ -1061,7 +1061,7 @@ async function getFinnComps(bil, vegData, page) {
 
   // 2a–2e: kjor filtre sekvensielt, stopp ved false
   await (async () => {
-    if (!await tryFilter({ kmTo }, `+km maks ${Math.round(kmTo / 1000)}k (+/-${Math.round(kmBand / 1000)}k)`, null)) return;
+    if (!await tryFilter({ kmFrom, kmTo }, `+km ${Math.round(kmFrom / 1000)}k–${Math.round(kmTo / 1000)}k (+/-${Math.round(kmBand / 1000)}k)`, null)) return;
     if (!await tryFilter(isHybrid ? {} : { fuel: true }, `+${vegData.fuel}`, isHybrid ? 'hybrid — hopper over drivstoff' : null)) return;
     if (!await tryFilter({ drive: true }, `+${vegData.drive}`, null)) return;
     if (!await tryFilter({ body: bodyType || undefined }, `+${vegData.karosseri || 'karosseri'}`, !bodyType ? 'ingen karosseri-mapping' : null)) return;
