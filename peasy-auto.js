@@ -46,7 +46,7 @@ const path = require('path');
 const { runV2Pricing } = require('./pricing-v2-glue');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.42';
+const VERSION = 'v20.45';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -813,7 +813,7 @@ function buildFinnUrl(make, model, yearFrom, yearTo, vegData, opts = {}) {
     .replace(/JAGUAR LAND ROVER LIMITED/i, 'Land Rover')
     .trim();
   const pkgSuffix = opts.package ? ' ' + opts.package : '';
-  const q = encodeURIComponent((cleanMake + " " + (model || "") + (opts.package ? " " + opts.package : "")).trim());
+  const q = encodeURIComponent((cleanMake + " " + (model || "")).trim());
 
   const hk = Math.round((vegData.kw || 0) * 1.36);
   const hkFrom = hk > 0 ? Math.floor(hk * 0.85 / 10) * 10 : 0;
@@ -830,9 +830,9 @@ function buildFinnUrl(make, model, yearFrom, yearTo, vegData, opts = {}) {
     opts.kmTo   ? `mileage_to=${opts.kmTo}`                    : '',
     opts.kmFrom ? `mileage_from=${opts.kmFrom}`        : '',
     opts.hk     ? `power_from=${hkFrom}&power_to=${hkTo}`      : '',
-    opts.drive  ? `wheel_drive=${vegData.drive === '4WD' ? '2' : '3'}` : '',
+    opts.drive  ? '' : '',
     opts.body   ? `body_type=${opts.body}`                      : '',
-        opts.drive ? (vegData.drive === '4WD' ? `wheel_drive=2` : `wheel_drive=1&wheel_drive=3`) : '',
+        opts.drive ? [...new Set(vegData.drive === '4WD' ? ['2'] : ['1', '3'])].map(d => `wheel_drive=${d}`).join('&') : '',
     opts.fuel   ? `fuel=${getFinnFuelCode(vegData.fuel)}`       : '',
     opts.gear   ? (getFinnGearCode(vegData.gearbox) ? `transmission=${getFinnGearCode(vegData.gearbox)}` : '') : '',
     opts.gear   ? (getFinnGearCode(vegData.gearbox) ? `transmission=${getFinnGearCode(vegData.gearbox)}` : '') : '',
