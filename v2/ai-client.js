@@ -5,7 +5,8 @@ import 'dotenv/config';
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL   = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
-const TIMEOUT = +process.env.TIMEOUT_AI || 30000;
+const TIMEOUT = +process.env.TIMEOUT_AI || 120000;
+console.error('[ai-client] TIMEOUT_AI=' + TIMEOUT + 'ms');
 const ENDPOINT = 'https://api.anthropic.com/v1/messages';
 
 // Retry-konfig
