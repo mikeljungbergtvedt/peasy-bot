@@ -46,7 +46,7 @@ const path = require('path');
 const { runV2Pricing } = require('./pricing-v2-glue');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.37';
+const VERSION = 'v20.38';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1633,6 +1633,47 @@ async function evalCar(bil, page, cache, opts = {}) {
   // v19.30: send regnr+km til grok-bot for hver bil
   sendGrok(regnr, bil.mileage);
   const erpId = bil.id;
+  // === v20.38 PRICING SAFETY VALVE ===
+  function _computeBlockers(o) {
+    const blockers = [];
+    const cmt = (o.sdComment || '').toString();
+    const kjorbar = /reparasjonsobjekt|starter ikke|motor.*defekt|delebil|motorstopp|registerreim|totalskade/i.test(cmt) ? 'nei' : (cmt ? 'usikker' : 'ja');
+    if (kjorbar === 'nei') blockers.push('selger_sier_ikke_kjorbar');
+    const oppgittKm = Number(o.oppgittKm) || 0;
+    let euMaxKm = 0;
+    try {
+      const insp = (o.history || []).filter(h => h && h.type === 'inspection');
+      euMaxKm = Math.max(0, ...insp.map(e => Number(e.km) || 0));
+    } catch (e) {}
+    if (euMaxKm > 0 && oppgittKm > 0 && euMaxKm > oppgittKm * 1.05) {
+      blockers.push('km_konflikt_eu_' + euMaxKm + '_oppgitt_' + oppgittKm);
+    }
+    const valgte = Array.isArray(o.valgteComps) ? o.valgteComps : [];
+    if (valgte.length < 3) blockers.push('kun_' + valgte.length + '_ekte_sosterbiler');
+    if (o.segConfidence === 'Best effort' || o.segConfidence === 'Special') {
+      blockers.push('seg_confidence_' + o.segConfidence);
+    }
+    return blockers;
+  }
+  async function _maybeBlock(o) {
+    const blockers = _computeBlockers(o);
+    if (!blockers.length) return false;
+    log('[v20.38] BLOKKERT skriving for ' + regnr + ' (' + erpId + '): ' + blockers.join(', '));
+    try {
+      await sendTelegram(
+        '\u26A0\uFE0F <b>MANUELL VURDERING</b>\n\n' +
+        'Regnr: ' + regnr + '\nInternnr: ' + erpId + '\n\n' +
+        'Flagg:\n  \u2022 ' + blockers.join('\n  \u2022 ') + '\n\n' +
+        'AI foreslo: ' + (o.dLav != null ? o.dLav : '?') + ' \u2013 ' + (o.dHoy != null ? o.dHoy : '?') + ' kr\n' +
+        'Segment-confidence: ' + (o.segConfidence || '?') + '\n\n' +
+        '<a href="https://app.biladministrasjon.no/cars/' + erpId + '">\u00C5pne i ERP</a>',
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) { logErr('blocker-alarm', regnr, e); }
+    try { cache[String(erpId)] = new Date().toISOString(); saveJSON(CACHE_FILE, cache); } catch (e) {}
+    return true;
+  }
+  // === end safety valve ===
 
   log(`--- ${regnr} (ERP ${erpId}) ---`);
 
@@ -1888,6 +1929,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           sdCommentF = (detF && detF.car && detF.car.self_declaration && detF.car.self_declaration.comment) || (detF && detF.car && detF.car.description) || null;
           imageCountF = (detF && detF.car && Array.isArray(detF.car.files)) ? detF.car.files.length : 0;
         } catch (eDf) {}
+        if (await _maybeBlock({ sdComment: sdCommentF, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: poolF, segConfidence: segF && segF.confidence, dLav: valuationF.dLav, dHoy: valuationF.dHoy })) return;
         const erpWrittenF = await maybeWriteToERP(bil, erpId, valuationF.dLav, valuationF.dHoy, valuationF.auctionTypeId, brregF.anyDebts, brregF, tokenF);
         const erpVerifyF = await maybeVerifyErp(bil, erpId, tokenF);
         const cardF = {
@@ -1972,6 +2014,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     } catch (e) { logErr('getErpCarDetail', e); }
 
     // 8. Skriv til ERP
+    if (await _maybeBlock({ sdComment: sdComment, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: (v2 && v2.anchor && v2.anchor.valgte_comps) || [], segConfidence: seg && seg.confidence, dLav: valuation.dLav, dHoy: valuation.dHoy })) return;
     const erpWritten = await maybeWriteToERP(bil, erpId, valuation.dLav, valuation.dHoy, valuation.auctionTypeId, brreg.anyDebts, brreg, token);
 
     // 9. Verifiser ERP
