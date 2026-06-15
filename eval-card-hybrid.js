@@ -231,10 +231,10 @@ function formatEvalCardHybrid(p, forErp = false) {
   const makeQ2 = String(veg.make || '').split(' ')[0];
   const modelQ2 = String(bil.model_series || veg.model || '').split('/')[0].split(/\s+/).slice(0, 2).join(' ').trim();
   const finnSokUrl = 'https://www.finn.no/mobility/search/car?registration_class=1&sort=PRICE_ASC&q=' + encodeURIComponent((makeQ2 + ' ' + modelQ2).trim()) + (bil.model_year ? '&year_from=' + bil.model_year + '&year_to=' + bil.model_year : '') + (originKm ? '&mileage_from=' + (Math.round(originKm * 0.85 / 1000) * 1000) + '&mileage_to=' + (Math.round(originKm * 1.25 / 1000) * 1000) : '');
-  const carInfoUrl2 = 'https://www.car.info/no-no/license-plate/N/' + String(bil.registration_number || '').replace(/\s/g, '');
+  const carInfoUrl2 = 'https://www.car.info/no-no/valuation/N/' + String(bil.registration_number || '').replace(/\s/g, '');
   const finnFunnelUrl = p.finnUrl || finnSokUrl;
   out.push(forErp ? ('Sok sosterbiler pa Finn (filtrert): ' + finnFunnelUrl) : ('<a href="' + esc(finnFunnelUrl) + '">\u{1F50D} S\u00f8k s\u00f8sterbiler p\u00e5 Finn (filtrert)</a>'));
-  out.push(forErp ? ('Generasjon/facelift: ' + carInfoUrl2) : ('<a href="' + esc(carInfoUrl2) + '">Generasjon/facelift (car.info)</a>'));
+  out.push(forErp ? ('Car.info verdivurdering: ' + carInfoUrl2) : ('<a href="' + esc(carInfoUrl2) + '">Car.info verdivurdering</a>'));
   out.push('');
 
   // ── 7. KALKYLE (Easy calcValuation — fasit som skrives til ERP) ─
