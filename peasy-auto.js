@@ -1600,9 +1600,6 @@ async function evalCar(bil, page, cache, opts = {}) {
     if (euMaxKm > 0 && oppgittKm > 0 && euMaxKm > oppgittKm * 1.05) {
       blockers.push('km_konflikt_eu_' + euMaxKm + '_oppgitt_' + oppgittKm);
     }
-    if (o.segConfidence === 'Best effort' || o.segConfidence === 'Special') {
-      blockers.push('seg_confidence_' + o.segConfidence);
-    }
     if (Number(o.dLav) < 3000) blockers.push('d_lav_under_vrakpant_' + o.dLav);
     return blockers;
   }
