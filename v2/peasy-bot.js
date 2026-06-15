@@ -24,7 +24,7 @@ import { buildEvalCard } from './telegram-v2.js';
 import { sendTelegram } from './telegram-bot.js';
 import { checkBrregForRegnr } from './brreg.js';
 
-const VERSION = 'peasy-bot v1.7';
+const VERSION = 'peasy-bot v1.8';
 const CACHE_FILE = '/Users/bot/peasy-pricing-v2/peasy-cache.json';
 const SCHEDULE_HOURS = { start: 7, end: 19 };
 
@@ -132,7 +132,7 @@ async function evalCar(bil, token) {
             'Flagg:\n  \u2022 ' + blockers.join('\n  \u2022 ') + '\n\n' +
             'AI foreslo: ' + dLav + ' \u2013 ' + dHoy + ' kr\n' +
             'Confidence: ' + (_conf != null ? _conf : '?') + '/100\n\n' +
-            '<a href="https://app.biladministrasjon.no/cars/' + erpId + '">\u00C5pne i ERP</a>',
+            '<a href="https://biladministrasjon.no/cars_driveno/processing/final_estimate/' + erpId + '">\u00C5pne i ERP</a>',
             { parse_mode: 'HTML' }
           );
         } catch (e) { logErr('blocker-alarm', e); }
