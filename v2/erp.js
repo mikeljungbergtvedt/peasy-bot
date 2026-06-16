@@ -66,9 +66,12 @@ export async function getErpCarDetail(erpId, token) {
 
 export async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, brreg, token) {
   log(`ERP: PUT D lav/hoy + alle felt for bil ${erpId}...`);
+  // V2 hardcoded read-only mot ERP — alle skriveoperasjoner returnerer
+console.log('[v2-erp-readonly] BLOKKERT writeToERP (kildekode-guard)');
+  return { ok: false, blocked: true, success: false };
   try {
     // Hent encumbrance.id
-    const detail = await getErpCarDetail(erpId, token);
+  const detail = await getErpCarDetail(erpId, token);
     const encumbranceId = detail?.car?.encumbrance?.id || null;
     const today = new Date();
     const dd = String(today.getDate()).padStart(2, '0');
@@ -76,17 +79,17 @@ export async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, brr
     const yyyy = today.getFullYear();
     const dateStr = `${dd}.${mm}.${yyyy}`;
     const encumbranceBase = {
-        check_date: dateStr,
-        comment: '',
-        debt_date: dateStr,
-        amount: 0,
-        account_number: '0',
-        reference: '0',
-        contact_information: '0',
-        contact_person: '',
-        any_debts: anyDebts || false,
-        checkmark: true,
-      };
+      check_date: dateStr,
+      comment: '',
+      debt_date: dateStr,
+      amount: 0,
+      account_number: '0',
+      reference: '0',
+      contact_information: '0',
+      contact_person: '',
+      any_debts: anyDebts || false,
+      checkmark: true,
+    };
     if (encumbranceId) encumbranceBase.id = encumbranceId;
     const payload = {
       price_final_min: dLav,
@@ -118,10 +121,10 @@ export async function verifyErpStatus(erpId, token) {
     const dLavHoy = (c.price_final_min > 0 && c.price_final_max > 0);
     return {
       dLavHoy,
-      auctionType:  (c.auction_price_type_id != null),
+      auctionType: (c.auction_price_type_id != null),
       encumbrances: (c.encumbrance?.checkmark === true),
-      owners:       (c.owners_check_date != null),
-      finans:       (c.encumbrance?.any_debts === true),
+      owners: (c.owners_check_date != null),
+      finans: (c.encumbrance?.any_debts === true),
     };
   } catch (e) {
     logErr(`verifyErpStatus ${erpId}`, e);
@@ -149,6 +152,9 @@ export async function postToChat(erpId, evalText, token) {
 }
 
 export async function confirmFinalEstimate(erpId, token) {
+  // V2 hardcoded read-only mot ERP — alle skriveoperasjoner returnerer
+console.log('[v2-erp-readonly] BLOKKERT confirmFinalEstimate (kildekode-guard)');
+  return { ok: false, blocked: true, success: false };
   try {
     const res = await fetch(`${process.env.ERP_BASE || "https://api.biladministrasjon.no"}/c2b_module/peasy/processing/update/${erpId}/final_estimate/confirm`, {
       method: 'POST',
@@ -168,14 +174,14 @@ export async function getListe2() {
   const res = await fetch(
     `${process.env.ERP_BASE || "https://api.biladministrasjon.no"}/c2b_module/peasy/processing/sd_received?per_page=100`,
     { headers: authH(token) }
-  );
+    );
   const data = await res.json();
   const raw = data.data?.data?.data || [];
   const biler = raw.map(b => ({
     ...b,
     model_series: b.drive_no_car_data?.model_series || b.driveNoCarData?.model_series || b.model_series || '',
-    model_year:   b.drive_no_car_data?.model_year   || b.driveNoCarData?.model_year   || b.model_year   || 0,
-    mileage:      getKmForRegnr(b.registration_number) || b.mileage || 0,
+    model_year: b.drive_no_car_data?.model_year || b.driveNoCarData?.model_year || b.model_year || 0,
+    mileage: getKmForRegnr(b.registration_number) || b.mileage || 0,
     karosseri_erp: '',
   }));
   log(`ERP: ${biler.length} biler pa liste 2`);
@@ -189,14 +195,14 @@ export async function getListe3() {
   const res = await fetch(
     `${process.env.ERP_BASE || "https://api.biladministrasjon.no"}/c2b_module/peasy/processing/final_estimate?per_page=100`,
     { headers: authH(token) }
-  );
+    );
   const data = await res.json();
   const raw = data.data?.data?.data || [];
   const biler = raw.map(b => ({
     ...b,
     model_series: b.drive_no_car_data?.model_series || b.driveNoCarData?.model_series || b.model_series || '',
-    model_year:   b.drive_no_car_data?.model_year   || b.driveNoCarData?.model_year   || b.model_year   || 0,
-    mileage:      getKmForRegnr(b.registration_number) || b.mileage || 0,
+    model_year: b.drive_no_car_data?.model_year || b.driveNoCarData?.model_year || b.model_year || 0,
+    mileage: getKmForRegnr(b.registration_number) || b.mileage || 0,
     karosseri_erp: '',
   }));
   log(`ERP: ${biler.length} biler pa liste 3`);
@@ -221,7 +227,9 @@ export async function promoteToListe3(erpId, token) {
 
 export async function maybeWriteToERP(bil, erpId, dLav, dHoy, atid, ad, br, tok) {
   if (!bil || !bil.id) { log("TESTMODUS - hopper over writeToERP"); return false; }
-  return writeToERP(erpId, dLav, dHoy, atid, ad, br, tok);
+  // V2 hardcoded read-only mot ERP — alle skriveoperasjoner returnerer
+console.log('[v2-erp-readonly] BLOKKERT maybeWriteToERP (kildekode-guard)');
+  return { ok: false, blocked: true, success: false };
 }
 
 export async function maybeVerifyErp(bil, erpId, tok) {
