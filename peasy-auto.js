@@ -43,10 +43,11 @@ require('dotenv').config();
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
-const { runV2Pricing } = require('./pricing-v2-glue');
+const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
+const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.47';
+const VERSION = 'v20.48';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1846,11 +1847,44 @@ async function evalCar(bil, page, cache, opts = {}) {
     log(`Segment: ${seg.label} | alder=${seg.age}y | km/y=${seg.kmPerYear ? seg.kmPerYear.toLocaleString('nb-NO') : '?'}`);
 
     let v2 = null, v2feil = null;
+    let ankerKilde = null;
     try {
-      v2 = await runV2Pricing(regnr, bil.mileage || 0);
+      // v20.48: Easy egen primaer AI-anker. Hent data EN gang, kjor Easy AI
+      // primaert, V2 AI som fallback paa SAMME data, Finn statistisk siste utvei.
+      const collected = await collectOnly(regnr, bil.mileage || 0);
+      const buildSold = (anchorObj) => {
+        const begMap = new Map();
+        for (const v of [...((anchorObj && anchorObj.valgte_comps) || []), ...((anchorObj && anchorObj.ekskluderte_comps) || [])]) {
+          const plate = String(v.licence_plate || '').toUpperCase().replace(/\s/g, '');
+          if (plate && v.begrunnelse && !begMap.has(plate)) begMap.set(plate, v.begrunnelse);
+        }
+        const withBeg = (c) => { const p = String(c.licence_plate || '').toUpperCase().replace(/\s/g, ''); const b = begMap.get(p); return b ? { ...c, begrunnelse: b } : c; };
+        const soldSort = (a, b) => String(b.sold_date || '').localeCompare(String(a.sold_date || ''));
+        const dd = collected.deduped || [];
+        return {
+          soldForhandler: dd.filter(c => c.type === 'forhandler' && c.sold_date).sort(soldSort).slice(0, 10).map(withBeg),
+          soldPrivat: dd.filter(c => c.type === 'privat' && c.sold_date).sort(soldSort).slice(0, 10).map(withBeg),
+        };
+      };
+      const ankerGyldig = (a) => a && a.anker_beregning && Number.isFinite(Number(a.anker_beregning.anker)) && Number(a.anker_beregning.anker) > 0;
+      try {
+        if (!collected.comps || collected.comps.length === 0) throw new Error('ingen comps for Easy AI');
+        const easyAnchor = await easy.chooseAnchor({ data: collected.data, origin: collected.origin, comps: collected.comps });
+        if (!ankerGyldig(easyAnchor)) throw new Error('Easy AI ga ugyldig/tomt anker');
+        const sold = buildSold(easyAnchor);
+        v2 = { anchor: easyAnchor, activeComps: collected.activeComps || [], soldForhandler: sold.soldForhandler, soldPrivat: sold.soldPrivat, errors: (collected.data && collected.data.errors) || [] };
+        ankerKilde = 'easy';
+        log('Anker fra: Easy AI (v20.48)');
+      } catch (easyErr) {
+        log('Easy AI ga ugyldig JSON/feilet, fallback V2: ' + (easyErr.message || easyErr));
+        v2 = await runV2Pricing(regnr, bil.mileage || 0);
+        ankerKilde = 'v2';
+        log('Anker fra: V2 AI (Easy AI feilet)');
+      }
     } catch (e2) {
       v2feil = e2.message || 'ukjent';
       logErr('v2-prising ' + regnr, e2);
+      log('Anker fra: Finn statistisk (begge AI feilet)');
     }
     let v2anker = v2 && v2.anchor && v2.anchor.anker_beregning ? v2.anchor.anker_beregning.anker : null;
     if (!v2feil && (!Number.isFinite(v2anker) || v2anker <= 0)) {
@@ -1899,7 +1933,7 @@ async function evalCar(bil, page, cache, opts = {}) {
             registration_number: regnr, id: erpId, model_year: bil.model_year,
             mileage: bil.mileage, model_series: bil.model_series,
             make: vegData ? vegData.make : (bil.make || ''),
-            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true }
+            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: null, begrunnelse_kort: null, anker_kilde: 'finn' }
           });
           fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2PayloadF + '\n');
           log('[easy->v2] Matet shadow (fallback) for ' + regnr);
@@ -1996,8 +2030,10 @@ async function evalCar(bil, page, cache, opts = {}) {
     _evalRegnrMap[erpId] = regnr;
     _evalDataMap[erpId] = { regnr, segment: seg.segment, lowestComp: valuation.lowestComp, anyDebts: brreg.anyDebts, brreg, bil };
     persistEvalData();
+    let tgKort = formatEvalCardHybrid({ ...cardParams, chatPosted }, false);
+    if (ankerKilde === 'v2') tgKort = '\u26a0\ufe0f Easy AI feilet, brukte V2-fallback\n' + tgKort;
     await sendTelegram(
-      formatEvalCardHybrid({ ...cardParams, chatPosted }, false),
+      tgKort,
       (bil.id ? { inline_keyboard: [[
         { text: '✅ Send eval', callback_data: `confirm:${erpId}` },
         { text: '✏️ Endre anker', callback_data: `editanchor:${erpId}` }
@@ -2026,7 +2062,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           registration_number: regnr, id: erpId, model_year: bil.model_year,
           mileage: bil.mileage, model_series: bil.model_series,
           make: vegData ? vegData.make : (bil.make || ''),
-          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null }
+          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null, begrunnelse_kort: (v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null, anker_kilde: ankerKilde }
         });
         fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2Payload + '\n');
         log('[easy->v2] Matet shadow for ' + regnr);
