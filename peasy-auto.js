@@ -46,7 +46,7 @@ const path = require('path');
 const { runV2Pricing } = require('./pricing-v2-glue');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.46';
+const VERSION = 'v20.47';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1618,7 +1618,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         { parse_mode: 'HTML' }
       );
     } catch (e) { logErr('blocker-alarm', regnr, e); }
-    try { if (erpId) { cache[String(erpId)] = new Date().toISOString(); } saveJSON(CACHE_FILE, cache); } catch (e) {}
+    // v20.47: ikke cache blokkerte biler (blocker-path cache-write fjernet)
     return true;
   }
   // === end safety valve ===
