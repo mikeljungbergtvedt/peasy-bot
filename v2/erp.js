@@ -68,7 +68,7 @@ export async function writeToERP(erpId, dLav, dHoy, auctionTypeId, anyDebts, brr
   log(`ERP: PUT D lav/hoy + alle felt for bil ${erpId}...`);
   // V2 hardcoded read-only mot ERP — alle skriveoperasjoner returnerer
 console.log('[v2-erp-readonly] BLOKKERT writeToERP (kildekode-guard)');
-  return { ok: false, blocked: true, success: false };
+  return false;
   try {
     // Hent encumbrance.id
   const detail = await getErpCarDetail(erpId, token);
@@ -133,6 +133,9 @@ export async function verifyErpStatus(erpId, token) {
 }
 
 export async function postToChat(erpId, evalText, token) {
+  // V2 hardcoded read-only mot ERP — alle skriveoperasjoner returnerer
+console.log('[v2-erp-readonly] BLOKKERT postToChat (kildekode-guard)');
+  return false;
   const checkRes = await fetch(`${process.env.ERP_BASE || "https://api.biladministrasjon.no"}/c2b_module/driveno/${erpId}/comments/all`, { headers: authH(token) });
   const checkData = await checkRes.json();
   const existing = Array.isArray(checkData.data) ? checkData.data : [];
@@ -154,7 +157,7 @@ export async function postToChat(erpId, evalText, token) {
 export async function confirmFinalEstimate(erpId, token) {
   // V2 hardcoded read-only mot ERP — alle skriveoperasjoner returnerer
 console.log('[v2-erp-readonly] BLOKKERT confirmFinalEstimate (kildekode-guard)');
-  return { ok: false, blocked: true, success: false };
+  return false;
   try {
     const res = await fetch(`${process.env.ERP_BASE || "https://api.biladministrasjon.no"}/c2b_module/peasy/processing/update/${erpId}/final_estimate/confirm`, {
       method: 'POST',
@@ -229,7 +232,7 @@ export async function maybeWriteToERP(bil, erpId, dLav, dHoy, atid, ad, br, tok)
   if (!bil || !bil.id) { log("TESTMODUS - hopper over writeToERP"); return false; }
   // V2 hardcoded read-only mot ERP — alle skriveoperasjoner returnerer
 console.log('[v2-erp-readonly] BLOKKERT maybeWriteToERP (kildekode-guard)');
-  return { ok: false, blocked: true, success: false };
+  return false;
 }
 
 export async function maybeVerifyErp(bil, erpId, tok) {
