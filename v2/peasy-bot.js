@@ -24,7 +24,7 @@ import { buildEvalCard } from './telegram-v2.js';
 import { sendTelegram } from './telegram-bot.js';
 import { checkBrregForRegnr } from './brreg.js';
 
-const VERSION = 'peasy-bot v1.9';
+const VERSION = 'peasy-bot v1.10';
 const CACHE_FILE = '/Users/bot/peasy-pricing-v2/peasy-cache.json';
 const SCHEDULE_HOURS = { start: 7, end: 19 };
 
