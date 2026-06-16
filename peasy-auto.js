@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.49';
+const VERSION = 'v20.50';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1848,6 +1848,7 @@ async function evalCar(bil, page, cache, opts = {}) {
 
     let v2 = null, v2feil = null;
     let ankerKilde = null;
+    let easyConfidence = null, easyBegr = null; // v20.50: Easys egen confidence til shadow-feed
     try {
       // v20.48: Easy egen primaer AI-anker. Hent data EN gang, kjor Easy AI
       // primaert, V2 AI som fallback paa SAMME data, Finn statistisk siste utvei.
@@ -1874,6 +1875,8 @@ async function evalCar(bil, page, cache, opts = {}) {
         const sold = buildSold(easyAnchor);
         v2 = { anchor: easyAnchor, activeComps: collected.activeComps || [], soldForhandler: sold.soldForhandler, soldPrivat: sold.soldPrivat, errors: (collected.data && collected.data.errors) || [] };
         ankerKilde = 'easy';
+        easyConfidence = (easyAnchor && easyAnchor.confidence != null) ? easyAnchor.confidence : null;
+        easyBegr = (easyAnchor && easyAnchor.begrunnelse_kort) || null;
         log('Anker fra: Easy AI (v20.48)');
       } catch (easyErr) {
         log('Easy AI ga ugyldig JSON/feilet, fallback V2: ' + (easyErr.message || easyErr));
@@ -1933,7 +1936,7 @@ async function evalCar(bil, page, cache, opts = {}) {
             registration_number: regnr, id: erpId, model_year: bil.model_year,
             mileage: bil.mileage, model_series: bil.model_series,
             make: vegData ? vegData.make : (bil.make || ''),
-            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: null, begrunnelse_kort: null, anker_kilde: 'finn' }
+            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: easyConfidence, begrunnelse_kort: easyBegr, anker_kilde: 'finn' }
           });
           fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2PayloadF + '\n');
           log('[easy->v2] Matet shadow (fallback) for ' + regnr);
@@ -2062,7 +2065,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           registration_number: regnr, id: erpId, model_year: bil.model_year,
           mileage: bil.mileage, model_series: bil.model_series,
           make: vegData ? vegData.make : (bil.make || ''),
-          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null, begrunnelse_kort: (v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null, anker_kilde: ankerKilde }
+          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde }
         });
         fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2Payload + '\n');
         log('[easy->v2] Matet shadow for ' + regnr);
