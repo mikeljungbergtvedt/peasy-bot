@@ -66,12 +66,20 @@ async function processLine(line) {
   // Dedupe: skip hvis regnr evaluert siste 7 dager (sparer Anthropic-tokens)
   try {
     const measFile = path.join(__dirname, 'logs.nosync', 'measurements.jsonl');
+    // FIX: hydrer lokal dedup-fil fra publisert remote hvis den mangler (ellers dedup aldri)
+    if (!fs.existsSync(measFile)) {
+      try {
+        await fs.promises.mkdir(path.dirname(measFile), { recursive: true });
+        const remote = await fetch('https://raw.githubusercontent.com/mikeljungbergtvedt/mikeljungbergtvedt.github.io/main/v2-measurements.jsonl?t='+Date.now());
+        if (remote.ok) fs.writeFileSync(measFile, await remote.text());
+      } catch (eh) { console.error('[dedup] hydrering feilet: '+(eh&&eh.message)); }
+    }
     if (fs.existsSync(measFile)) {
       const lines = fs.readFileSync(measFile, 'utf-8').trim().split('\n');
-      const recent = lines.slice().reverse().find(l => {
+      const recent = (erpId == null) ? null : lines.slice().reverse().find(l => {
         try {
           const r = JSON.parse(l);
-          if (r.regnr !== regnr) return false;
+          if (String(r.erpId) !== String(erpId)) return false;
           const age = Date.now() - new Date(r.timestamp).getTime();
           return age < 7 * 24 * 60 * 60 * 1000;
         } catch { return false; }
