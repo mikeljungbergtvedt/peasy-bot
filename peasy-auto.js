@@ -541,9 +541,24 @@ async function confirmFinalEstimate(erpId, token) {
 async function getCarInfoFetch(regnr) {
   const url = `https://www.car.info/no-no/license-plate/N/${regnr.replace(/\s/g,'')}`;
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language':'no,en;q=0.8' } });
-    if (!r.ok) { log(`car.info ${r.status} for ${regnr}`); return null; }
-    const html = await r.text();
+    let html;
+    if (page) {
+      // v20.55: hent via browser-context (Cloudflare-clearance) -> unngaar 403
+      html = await page.evaluate(async (u) => {
+        const rr = await fetch(u, { headers: { 'Accept': 'text/html', 'Accept-Language': 'nb-NO,nb;q=0.9,no;q=0.8,en;q=0.7' } });
+        if (!rr.ok) return '__HTTP_' + rr.status + '__';
+        return await rr.text();
+      }, url);
+      if (typeof html === 'string' && html.startsWith('__HTTP_')) { log(`elbilradar ${html.replace(/__/g,'').replace('HTTP_','')}`); return null; }
+    } else {
+      const r = await fetch(url, { headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept-Language': 'nb-NO,nb;q=0.9,no;q=0.8,en;q=0.7',
+        'Accept': 'text/html'
+      } });
+      if (!r.ok) { log(`elbilradar ${r.status}`); return null; }
+      html = await r.text();
+    }
     const titleM = html.match(/<title>([^<]+)<\/title>/i);
     const title = titleM ? titleM[1].trim() : '';
     let variant = '';
@@ -614,7 +629,7 @@ function parseElbilradarFields(html) {
   }
   return out;
 }
-async function getElbilradarFetch(regnr) {
+async function getElbilradarFetch(regnr, page) {
   const url = `https://elbilradar.com/elbil_data.php?regnr=${regnr.replace(/\s/g,'')}`;
   try {
     const r = await fetch(url, { headers: {
@@ -1158,12 +1173,13 @@ async function getAnchorAi(pool, seg, bil, vegData) {
       km: bil.mileage || 0,
       hp: vegData.kw ? Math.round(vegData.kw * 1.36) : null,
       fuel: vegData.fuel,
-      drive: vegData.drive
+      drive: vegData.drive,
+      rekkevidde_wltp: bil.elbRekkevidde || vegData.range || null
     };
     const lines = pool.map(function(c, i) {
       return (i+1) + '. ' + JSON.stringify({title:c.title||c.heading||'', price:c.price, year:c.year, km:c.km, fuel:c.fuel, hp:c.hp||c.power, drive:c.drive||c.wheelDrive});
     });
-    const prompt = 'Du er ekspert paa bruktbil-prising. Velg de 5 BEST sammenlignbare komp-bilene mot origin. Vurder motorfamilie, drivlinje, utstyrspakke, km naer origin, aarstall innen 1, hk-niva. Returner KUN et JSON-array med 5 valgte (1-indeksert): [{"i":N,"why":"kort"}]. ORIGIN:\n' + JSON.stringify(origin) + '\n\nKANDIDATER:\n' + lines.join('\n');
+    const prompt = 'Du er ekspert paa bruktbil-prising. Velg de 5 BEST sammenlignbare komp-bilene mot origin. Vurder motorfamilie, drivlinje, utstyrspakke, km naer origin, aarstall innen 1, hk-niva. For elbiler: rekkevidde_wltp er VIKTIGST - prioriter comps med samme rekkevidde-klasse (samme batteri/variant), avvik > 10% rekkevidde = annen variant. Returner KUN et JSON-array med 5 valgte (1-indeksert): [{"i":N,"why":"kort"}]. ORIGIN:\n' + JSON.stringify(origin) + '\n\nKANDIDATER:\n' + lines.join('\n');
     const ctrl = new AbortController();
     const t = setTimeout(function() { ctrl.abort(); }, 12000);
     const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1688,7 +1704,7 @@ async function evalCar(bil, page, cache, opts = {}) {
   try {
     // PEASY: hent variant fra car.info + elbilradar (for el)
     const carInfo = await getCarInfoFetch(regnr);
-    const elbilRad = vegData.fuel && /el/i.test(vegData.fuel) ? await getElbilradarFetch(regnr) : null;
+    const elbilRad = vegData.fuel && /el/i.test(vegData.fuel) ? await getElbilradarFetch(regnr, page) : null;
     const peasyVariant = (carInfo?.variant || '').trim();
   // PEASY: lagre elbilradar pakke + utstyr paa bil (brukt i kort og Finn-soek)
   if (elbilRad) {
