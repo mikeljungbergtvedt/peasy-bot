@@ -524,7 +524,13 @@ async function confirmFinalEstimate(erpId, token) {
     });
     const data = await res.json();
     if (data.success) { log(`ERP confirm OK for ${erpId}`); return { ok: true }; }
-    logErr(`confirmFinalEstimate ${erpId}`, data);
+    // v20.52: behandle "allerede bekreftet/laast" som OK (no-op) -- bilen er alt ferdigstilt i ERP
+    const _msg = JSON.stringify(data || {}).toLowerCase();
+    if (/allerede|already|confirmed|bekreftet|laast|l\u00e5st|locked|finalized|ferdigstilt/.test(_msg)) {
+      log(`ERP confirm: ${erpId} allerede bekreftet (no-op, OK)`);
+      return { ok: true, noop: true };
+    }
+    logErr(`confirmFinalEstimate ${erpId} -> ` + JSON.stringify(data));
     return { ok: false, errors: data.errors || data.message };
   } catch (e) { logErr(`confirmFinalEstimate ${erpId}`, e); return { ok: false, errors: e.message }; }
 }
