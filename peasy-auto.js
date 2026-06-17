@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.50';
+const VERSION = 'v20.56';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
