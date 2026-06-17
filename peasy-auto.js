@@ -1591,7 +1591,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     const blockers = [];
     const cmt = (o.sdComment || '').toString();
     const kjorbar = /reparasjonsobjekt|starter ikke|motor.*defekt|delebil|motorstopp|registerreim|totalskade/i.test(cmt) ? 'nei' : (cmt ? 'usikker' : 'ja');
-    if (kjorbar === 'nei') blockers.push('selger_sier_ikke_kjorbar');
+    /* v20.51: kjorbar-blokker fjernet (for aggressiv regex) */
     const oppgittKm = Number(o.oppgittKm) || 0;
     let euMaxKm = 0;
     try {
