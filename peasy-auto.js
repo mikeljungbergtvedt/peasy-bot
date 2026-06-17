@@ -1174,12 +1174,16 @@ async function getAnchorAi(pool, seg, bil, vegData) {
       hp: vegData.kw ? Math.round(vegData.kw * 1.36) : null,
       fuel: vegData.fuel,
       drive: vegData.drive,
-      rekkevidde_wltp: bil.elbRekkevidde || vegData.range || null
+      rekkevidde_wltp: bil.elbRekkevidde || vegData.range || null,
+      kw: vegData.kw || null,
+      egenvekt: bil.egenvekt || null,
+      toppfart: bil.toppfart || null,
+      motoreffekt_kw: bil.motorEffekt || null
     };
     const lines = pool.map(function(c, i) {
       return (i+1) + '. ' + JSON.stringify({title:c.title||c.heading||'', price:c.price, year:c.year, km:c.km, fuel:c.fuel, hp:c.hp||c.power, drive:c.drive||c.wheelDrive});
     });
-    const prompt = 'Du er ekspert paa bruktbil-prising. Velg de 5 BEST sammenlignbare komp-bilene mot origin. Vurder motorfamilie, drivlinje, utstyrspakke, km naer origin, aarstall innen 1, hk-niva. For elbiler: rekkevidde_wltp er VIKTIGST - prioriter comps med samme rekkevidde-klasse (samme batteri/variant), avvik > 10% rekkevidde = annen variant. Returner KUN et JSON-array med 5 valgte (1-indeksert): [{"i":N,"why":"kort"}]. ORIGIN:\n' + JSON.stringify(origin) + '\n\nKANDIDATER:\n' + lines.join('\n');
+    const prompt = 'Du er ekspert paa bruktbil-prising. Velg de 5 BEST sammenlignbare komp-bilene mot origin. Maalet er aa finne SOESTERBILEN - samme variant som origin. Vurder HELHETEN: motorfamilie, drivlinje, utstyrspakke, km naer origin, aarstall innen 1, og effekt (kw/hk). For elbiler er rekkevidde_wltp, kw, egenvekt, toppfart og motoreffekt_kw alle viktige signaler paa lik linje med de andre - ingen enkelt er avgjoerende. Bruk SUMMEN av alle signalene: den comp-bilen som samlet ligner mest paa origin paa tvers av alle disse er soesterbilen. Smaa avvik paa ett signal er ok hvis helheten stemmer. Returner KUN et JSON-array med 5 valgte (1-indeksert): [{"i":N,"why":"kort"}]. ORIGIN:\n' + JSON.stringify(origin) + '\n\nKANDIDATER:\n' + lines.join('\n');
     const ctrl = new AbortController();
     const t = setTimeout(function() { ctrl.abort(); }, 12000);
     const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1746,6 +1750,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     bil.eiere = elbilRad.eiere || null;
     bil.bruktimportertFra = elbilRad.bruktimportertFra || null;
     bil.elbDrivlinje = elbilRad.drivlinje || null;
+    bil.egenvekt = elbilRad.egenvekt || null;
     bil.elbRekkevidde = elbilRad.rekkevidde || null;
     bil.garanti = elbilRad.garanti || null;
     // Hvis modelFull mangler men spesifikasjon finnes -> bruk vegData.make + model + spesifikasjon
