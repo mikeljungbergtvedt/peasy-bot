@@ -1592,6 +1592,8 @@ async function evalCar(bil, page, cache, opts = {}) {
   // v19.30: send regnr+km til grok-bot for hver bil
   sendGrok(regnr, bil.mileage);
   const erpId = bil.id;
+  // v20.53: ALLTID soek regnr paa FINN (vet om bilen er aktiv paa Finn)
+  let finnSelf = null; try { finnSelf = await checkFinnListing(regnr, bil, page); } catch (eFs) { logErr(`finnSelf ${regnr}`, eFs); }
   // === v20.38 PRICING SAFETY VALVE ===
   function _computeBlockers(o) {
     const blockers = [];
@@ -1925,7 +1927,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         const erpVerifyF = await maybeVerifyErp(bil, erpId, tokenF);
         const cardF = {
           bil: bil, vegData: vegData, pool: poolF, anchor: anchorF, finnUrl: rF.finnUrl, totalCount: rF.totalCount, seg: segF,
-          finnListing: null, brreg: brregF, valuation: valuationF, sdComment: sdCommentF, imageCount: imageCountF,
+          finnListing: finnSelf, brreg: brregF, valuation: valuationF, sdComment: sdCommentF, imageCount: imageCountF,
           erpWritten: erpWrittenF, erpVerify: erpVerifyF, chatPosted: false, qaOverride: false,
           funnelSteps: (rF && rF.funnelSteps) || [], prevEvals: getPrevEvals(regnr, erpId)
         };
@@ -2024,6 +2026,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     });
     // 10. Bygg eval-kort (hybrid: Easy topp/bunn + v2 comps/anker/risiko)
     const cardParams = {
+      finnListing: finnSelf,
       finnUrl: finnFunnelTightUrl,
       bil, vegData, seg, valuation, imageCount, sdComment, brreg,
       anchor: v2.anchor,
