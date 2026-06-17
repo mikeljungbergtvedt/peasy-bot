@@ -1937,7 +1937,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         _evalDataMap[erpId] = { regnr: regnr, segment: segF.segment, lowestComp: valuationF.lowestComp, anyDebts: brregF.anyDebts, brreg: brregF, bil: bil };
         persistEvalData();
         await sendTelegram(merkeF + formatEvalCard(Object.assign({}, cardF, { chatPosted: chatPostedF }), false),
-          (bil.id ? { inline_keyboard: [[{ text: '✅ Send eval', callback_data: 'confirm:' + erpId }, { text: '✏️ Endre anker', callback_data: 'editanchor:' + erpId }]] } : undefined));
+          (bil.id ? { inline_keyboard: [[{ text: '✅ Send eval', callback_data: 'confirm:' + erpId }, { text: '✏️ Endre anker', callback_data: 'editanchor:' + erpId }, { text: '🗑 Slett cache', callback_data: 'delcache:' + erpId }]] } : undefined));
         if (erpWrittenF) addToCache(cache, erpId);
         try {
           var v2PayloadF = JSON.stringify({
@@ -2048,7 +2048,7 @@ async function evalCar(bil, page, cache, opts = {}) {
       tgKort,
       (bil.id ? { inline_keyboard: [[
         { text: '✅ Send eval', callback_data: `confirm:${erpId}` },
-        { text: '✏️ Endre anker', callback_data: `editanchor:${erpId}` }
+        { text: '✏️ Endre anker', callback_data: `editanchor:${erpId}` }, { text: '🗑 Slett cache', callback_data: `delcache:${erpId}` }
       ]] } : undefined)
     );
 
@@ -2200,7 +2200,21 @@ async function pollTelegramCommands(cache) {
             });
             continue;
           }
-          if (cbData.startsWith('confirm:')) {
+          // v20.54: Slett fra cache -> bilen prises paa nytt
+        if (cbData.startsWith('delcache:')) {
+          const idC = cbData.split(':')[1];
+          const cacheD = loadJSON(CACHE_FILE);
+          const had = String(idC) in cacheD;
+          delete cacheD[String(idC)];
+          saveJSON(CACHE_FILE, cacheD);
+          log(`Cache: ${idC} slettet via knapp (hadde=${had})`);
+          await fetch(`https://api.telegram.org/bot${CONFIG.telegram.token}/answerCallbackQuery`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ callback_query_id: cb.id, text: had ? ('🗑 Slettet fra cache: ' + idC + ' - prises paa nytt') : ('Ikke i cache: ' + idC), show_alert: true }),
+          });
+          continue;
+        }
+        if (cbData.startsWith('confirm:')) {
             const erpIdCb = cbData.split(':')[1];
             log(`callback confirm: ${erpIdCb}`);
             await fetch(`https://api.telegram.org/bot${CONFIG.telegram.token}/answerCallbackQuery`, {
@@ -2269,7 +2283,7 @@ async function pollTelegramCommands(cache) {
               `${fullKortTekst}\n\n✅ ERP oppdatert + dokumentert. Klar til sending.`,
               { inline_keyboard: [[
                 { text: '✅ Send eval', callback_data: `confirm:${aId}` },
-                { text: '✏️ Endre anker', callback_data: `editanchor:${aId}` }
+                { text: '✏️ Endre anker', callback_data: `editanchor:${aId}` }, { text: '🗑 Slett cache', callback_data: `delcache:${aId}` }
               ]] }
             );
             log(`Endre anker ${aRegnr}: ${nyAnker} -> dLav ${nyVal.dLav} dHoy ${nyVal.dHoy}`);
