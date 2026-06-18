@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.58';
+const VERSION = 'v20.59';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1339,6 +1339,29 @@ function calcValuation(anchorPrice, segment, pool) {
 
 // ── Formater eval-kort ────────────────────────────────────────
 // Identisk med aj, men legger til segment + confidence-linje
+function buildManualCard(regnr, erpId, bil, vegData, reason) {
+  const make = (vegData && vegData.make) || (bil && bil.make) || '';
+  const model = (bil && bil.model_series) || (vegData && vegData.model) || '';
+  const yearV = (bil && bil.model_year) || (vegData && vegData.firstRegYear) || 0;
+  const hkV = (bil && bil.hk) || (vegData && vegData.hk) || null;
+  const vektV = (bil && bil.egenvekt) || null;
+  const kmV = (bil && bil.mileage) || 0;
+  const fuelV = (vegData && vegData.fuel) || '';
+  let finnUrl = '';
+  try { finnUrl = buildFinnUrl(make, model, yearV ? yearV-1 : 0, yearV ? yearV+1 : 0, vegData || {}, {}); } catch(e) { finnUrl=''; }
+  let t = '❗ ' + regnr + ': MANUELL PRISING (' + (reason||'ingen anker') + ')\n';
+  t += (make + ' ' + model).trim() + (yearV ? ' ' + yearV : '') + '\n';
+  const parts = [];
+  if (hkV) parts.push(hkV + ' hk');
+  if (vektV) parts.push(vektV + ' kg');
+  if (kmV) parts.push(kmV.toLocaleString('nb-NO') + ' km');
+  if (fuelV) parts.push(fuelV);
+  if (parts.length) t += parts.join(' | ') + '\n';
+  if (finnUrl) t += '\n<a href="' + finnUrl + '">Åpne Finn-søk</a>';
+  const kb = { inline_keyboard: [[{ text: '✅ Send eval', callback_data: 'confirm:' + erpId }, { text: '✏️ Endre anker', callback_data: 'editanchor:' + erpId }, { text: '🗑 Slett cache', callback_data: 'delcache:' + erpId }]] };
+  return { text: t, kb: kb };
+}
+
 function formatEvalCard(p, forErp = false) {
   const source = (p.bil.source || '').toLowerCase() === 'driveno' ? 'DRIVE' : 'PEASY';
   const qaTag = p.qaOverride ? ' \u26a1 QA OVERRIDE' : '';
@@ -1931,7 +1954,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         const rF = await getFinnComps(bil, vegData, page);
         const poolF = (rF && rF.pool) || [];
         if (poolF.length === 0) {
-          await sendTelegram('❌ ' + regnr + ': v2 feilet (' + v2feil + ') og ingen Finn-comps - MANUELL PRISING kreves.');
+          { const mc = buildManualCard(regnr, erpId, bil, vegData, 'v2 feilet: ' + v2feil + ' / ingen Finn-comps'); await sendTelegram(mc.text, mc.kb); }
           return;
         }
         const segF = (rF && rF.seg) || seg;
@@ -1975,7 +1998,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         log('--- ' + regnr + ' ferdig (FALLBACK) | ERP: ' + (erpWrittenF ? 'OK' : 'FEIL') + ' ---');
       } catch (eFb) {
         logErr('fallback ' + regnr, eFb);
-        await sendTelegram('❌ ' + regnr + ': Finn-fallback feilet ogsaa (' + (eFb.message || eFb) + ') - MANUELL PRISING kreves.');
+        { const mc = buildManualCard(regnr, erpId, bil, vegData, 'Finn-fallback feilet: ' + (eFb.message || eFb)); await sendTelegram(mc.text, mc.kb); }
       }
       return;
     }

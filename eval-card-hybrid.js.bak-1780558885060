@@ -1,0 +1,295 @@
+// eval-card-hybrid.js
+// HYBRID eval-kort: Easy topp/bunn + v2 comps/anker/risiko.
+// Erstatter formatEvalCard sin MIDT-blokk. Finn-soek og Service/EU-seksjon er
+// utelatt (minimal fusjon — kan legges til senere).
+//
+// Bruk i peasy-auto.js:
+//   const { formatEvalCardHybrid } = require('./eval-card-hybrid');
+//   const erpText = formatEvalCardHybrid(cardParams, true);   // ERP-kommentar (ren tekst)
+//   const tgText  = formatEvalCardHybrid(cardParams, false);  // Telegram (HTML)
+//
+// cardParams forventes aa inneholde:
+//   { bil, vegData, seg, imageCount, sdComment, brreg, valuation,
+//     anchor,            // v2 chooseAnchor-objektet (valgte_comps, anker_beregning, risiko_flagg, confidence, begrunnelse_kort)
+//     prevEvals,         // getPrevEvals(regnr, erpId)
+//     erpWritten, erpVerify, chatPosted, qaOverride }
+
+'use strict';
+
+function nf(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.round(v).toLocaleString('nb-NO') : '?';
+}
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// km-format: 152000 -> "152k km", <1000 -> "950 km"
+function kmShort(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return '? km';
+  return v >= 1000 ? `${Math.round(v / 1000)}k km` : `${Math.round(v)} km`;
+}
+const MND = ['jan', 'feb', 'mar', 'apr', 'mai', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'des'];
+// Gjoer "2026-02-14" -> "feb 2026". Andre strenger returneres som de er.
+function monthYear(s) {
+  if (!s) return '';
+  const m = String(s).match(/(\d{4})-(\d{2})/);
+  if (m) return `${MND[parseInt(m[2], 10) - 1] || '?'} ${m[1]}`;
+  return String(s).trim();
+}
+// Hoyrejuster et tall-felt til 10 tegn (for KALKYLE-kolonner i ren tekst)
+function rpad(n) {
+  return nf(n).padStart(10);
+}
+
+function formatEvalCardHybrid(p, forErp = false) {
+  const bil = p.bil || {};
+  const veg = p.vegData || {};
+  const seg = p.seg || {};
+  const val = p.valuation || {};
+  const anchor = p.anchor || {};
+  const comps = Array.isArray(anchor.valgte_comps) ? anchor.valgte_comps : [];
+  const ab = anchor.anker_beregning || {};
+
+  // HTML- vs ren-tekst-merking
+  const B = forErp ? (s) => s : (s) => `<b>${s}</b>`;
+  const I = forErp ? (s) => s : (s) => `<i>${s}</i>`;
+  const E = forErp ? (s) => String(s == null ? '' : s) : esc;
+
+  const out = [];
+
+  // ── 1. Tittel ────────────────────────────────────────────────
+  const source = (bil.source || '').toLowerCase() === 'driveno' ? 'DRIVE' : 'PEASY';
+  const qaTag = p.qaOverride ? ' ⚡ QA OVERRIDE' : '';
+  out.push(B(`${source} BIL TIL ESTIMERING${qaTag}`));
+
+  // ── 2. Bil-linje ─────────────────────────────────────────────
+  const isEl = (veg.fuel || '').toLowerCase().includes('elektr');
+  const hkStr = isEl
+    ? (veg.range ? `${veg.range} km rekkevidde` : `${veg.kw || '?'} kW`)
+    : (veg.hk ? `${veg.hk} hk` : (veg.kw ? `${veg.kw} kW` : ''));
+  const kmYear = seg.kmPerYear ? `${nf(seg.kmPerYear)} km/år` : '';
+  const karosseri = (veg.avgiftsgruppe || '').includes('Personbil')
+    ? 'Personbil'
+    : (veg.avgiftsgruppe || '').toLowerCase().includes('varebil')
+      ? 'Varebil'
+      : (veg.karosseri || bil.karosseri_erp || '');
+  const carLine = [
+    bil.registration_number,
+    `${veg.make || ''} ${bil.model_series || ''} ${bil.model_year || ''}`.trim(),
+    `${nf(bil.mileage || 0)} km`,
+    kmYear,
+    veg.fuel, veg.gearbox, veg.drive, hkStr, karosseri,
+    (p.imageCount && p.imageCount > 0) ? `🖼️ ${p.imageCount}` : '',
+  ].filter(Boolean).join(' | ');
+  out.push(forErp ? carLine : I(carLine));
+  out.push('');
+
+  // ── 3. Bilmodell-blokk ───────────────────────────────────────
+  // Gjenbruker Easy sin cv_text hvis den finnes (rik berikelse), ellers bygg fra vegData.
+  let bilmodell;
+  if (bil.cv_text) {
+    bilmodell = '🚗 Bilmodell\n' + bil.cv_text;
+  } else {
+    const modelDisp = bil.modelFull || `${veg.make || ''} ${veg.model || bil.model_series || ''}`.trim();
+    const l1 = [modelDisp, veg.hk ? veg.hk + ' hk' : '', veg.range ? veg.range + ' km rekkevidde' : '', bil.model_year || veg.firstRegYear || '']
+      .filter(Boolean).join(' · ');
+    const l2 = [veg.fuel, veg.gearbox, veg.drive, veg.karosseri].filter(Boolean).join(' · ');
+    const l3 = (bil.equipment && bil.equipment.length) ? bil.equipment.join(' · ') : '';
+    const l4 = [];
+    if (veg.motorCode || bil.motorEffekt) l4.push('Motor: ' + (bil.motorEffekt || veg.motorCode) + (veg.kw ? ` (${veg.kw} kW)` : ''));
+    if (veg.forstegangNorgeDato) l4.push('Første reg Norge: ' + veg.forstegangNorgeDato);
+    if (bil.farge || veg.farge) l4.push('Farge: ' + (bil.farge || veg.farge));
+    bilmodell = ['🚗 Bilmodell', l1, l2, l3, l4.join(' · ')].filter(Boolean).join('\n');
+  }
+  out.push(bilmodell);
+  out.push('');
+
+  // ── 4. Tidligere priset hos Peasy (dato, D lav/høy, status) ───
+  if (p.prevEvals && p.prevEvals.length) {
+    out.push('🔁 Tidligere priset hos Peasy');
+    p.prevEvals.forEach(e => {
+      const bits = [e.dato, e.dLavHoy ? `(${e.dLavHoy})` : '', e.status ? `– ${E(e.status)}` : '']
+        .filter(Boolean).join(' ');
+      out.push(bits || '(tidligere registrert)');
+    });
+    out.push('');
+  }
+
+  // ── 5. V2 COMPS ──────────────────────────────────────────────
+  // AKTIVE + SOLGTE leses DIREKTE fra car.info (p.activeComps / p.soldForhandler
+  // / p.soldPrivat), uavhengig av AI-utvalget. AI-begrunnelse er allerede lagt
+  // paa de compsene AI faktisk brukte. valgte*-tallene er kun til ANKER-breakdown.
+  const valgteAktive = comps.filter(c => c.status === 'aktiv');
+  const valgteForhandler = comps.filter(c => c.status !== 'aktiv' && c.type === 'forhandler');
+  const valgtePrivat = comps.filter(c => c.status !== 'aktiv' && c.type === 'privat');
+  const marketActive = Array.isArray(p.activeComps) ? p.activeComps : [];
+  const soldFh = Array.isArray(p.soldForhandler) ? p.soldForhandler : [];
+  const soldPv = Array.isArray(p.soldPrivat) ? p.soldPrivat : [];
+  const originKm = Number(p.bil && p.bil.mileage) || 0;
+
+  // Spess per comp: bruk det glue-en la pa (c._spec), ellers parse tittel som fallback
+  function specsOf(c) {
+    if (c._spec) return c._spec;
+    const t = String(c.title || '').replace(/^Bruktbil til salgs:\s*/i, '').replace(/\s*\|\s*FINN\.no\s*$/i, '');
+    const yM = t.match(/\b(19|20)\d{2}\b/);
+    const hM = t.match(/(\d{2,3})\s*hk/i);
+    const hk = hM ? parseInt(hM[1], 10) : null;
+    return { year: yM ? parseInt(yM[0], 10) : null, model: (t.split(' - ')[0] || '').trim(), hk, kW: hk ? Math.round(hk / 1.36) : null, body: '', ah: null };
+  }
+  // Spess-streng: år · variant · hk/kW · karosseri · batteri
+  function specStr(c) {
+    const s = specsOf(c);
+    const parts = [];
+    if (s.year) parts.push(String(s.year));
+    if (s.model) parts.push(s.model);
+    if (s.hk) parts.push(`${s.hk} hk${s.kW ? '/' + s.kW + ' kW' : ''}`);
+    if (s.body) parts.push(s.body);
+    if (s.ah) parts.push(`${s.ah} Ah`);
+    return parts.join(' · ') || '?';
+  }
+  function flagOf(c) {
+    if (c._comparable === true) return '✅ ';
+    if (c._comparable === false) return '⚠️ ';
+    return '';
+  }
+  // Linje 2: AI-begrunnelse > avvik-grunn > km/dager. Regnr til slutt (lite).
+  function note2(c, kind) {
+    let note = c.begrunnelse;
+    if (!note && Array.isArray(c._flag) && c._flag.length) note = 'avvik: ' + c._flag.join(', ');
+    if (!note) {
+      const bits = [];
+      if (Number.isFinite(Number(c.km)) && originKm) { const d = Number(c.km) - originKm; bits.push(`km-avvik ${d >= 0 ? '+' : '−'}${nf(Math.abs(d))}`); }
+      const dom = Number(c.days_on_market);
+      if (Number.isFinite(dom) && dom > 0) bits.push(kind === 'sold' ? `solgt på ${dom} d` : `${dom} d på marked`);
+      note = bits.join(' · ');
+    }
+    const reg = c.licence_plate || '';
+    if (!note && !reg) return '';
+    const inner = forErp
+      ? [note, reg].filter(Boolean).join(' · ')
+      : [note ? I(E(note)) : '', reg ? E(reg) : ''].filter(Boolean).join(' · ');
+    return `\n   ${inner}`;
+  }
+  function soldLine(c) {
+    const head = `${flagOf(c)}${specStr(c)} | ${kmShort(c.km)} | ${nf(c.price)} kr | solgt ${monthYear(c.sold_date)}`;
+    return head + note2(c, 'sold');
+  }
+  function activeLine(c) {
+    const url = c.finn_url || c.classified_url || '';
+    const since = c.published_date ? ' | siden ' + monthYear(c.published_date) : '';
+    const head = `${flagOf(c)}${specStr(c)} | ${kmShort(c.km)} | ${nf(c.price)} kr${since}`;
+    const link = url ? (forErp ? `\n   ${url}` : `\n   <a href="${esc(url)}">Åpne annonse</a>`) : '';
+    return head + note2(c, 'aktiv') + link;
+  }
+  function group(title, arr, lineFn) {
+    out.push(title);
+    out.push(arr.length ? arr.map(lineFn).join('\n') : '(ingen)');
+    out.push('');
+  }
+  out.push(B('Evalueringsgrunnlag'));
+  out.push('');
+  out.push(`📌 AKTIVE ANNONSER PÅ MARKEDET (${marketActive.length})`);
+  out.push(marketActive.length ? marketActive.map(activeLine).join('\n') : '(ingen aktive akkurat nå)');
+  out.push('');
+  group(`🏪 SOLGTE – FORHANDLER (${soldFh.length})`, soldFh, soldLine);
+  group(`👤 SOLGTE – PRIVAT (${soldPv.length})`, soldPv, soldLine);
+
+  // ── 6. ANKER ─────────────────────────────────────────────────
+  const breakdown = [
+    valgteForhandler.length ? `${valgteForhandler.length} forhandler` : '',
+    valgtePrivat.length ? `${valgtePrivat.length} privat` : '',
+    valgteAktive.length ? `${valgteAktive.length} aktiv` : '',
+  ].filter(Boolean).join(' + ');
+  const valgteKm = comps.map(c => Number(c.km)).filter(n => Number.isFinite(n) && n > 0);
+  const avgKm = valgteKm.length ? Math.round(valgteKm.reduce((a, b) => a + b, 0) / valgteKm.length) : 0;
+  const minKm = valgteKm.length ? Math.min(...valgteKm) : 0;
+  const maxKm = valgteKm.length ? Math.max(...valgteKm) : 0;
+  const kmDiff = avgKm - originKm;
+  const variant = (p.anchor && p.anchor.identifikasjon && p.anchor.identifikasjon.variant) || '';
+  out.push(B('ANKER'));
+  out.push(`Ankerpris: ${nf(ab.anker)} kr — snitt av ${comps.length} valgte salg${breakdown ? ` (${breakdown})` : ''}`);
+  if (avgKm) {
+    out.push(`Ankerbiler: snitt km ${nf(avgKm)} (${kmDiff >= 0 ? '+' : '−'}${nf(Math.abs(kmDiff))} vs origin ${nf(originKm)}) · spenn ${Math.round(minKm / 1000)}k–${Math.round(maxKm / 1000)}k km`);
+  }
+  if (variant) out.push(`Variant: ${E(variant)} — AI vurderte alle valgte som sammenlignbare`);
+  if (p.cappedFrom) out.push(`⚠️ Anker capet til aktiv Finn-annonse: ${nf(p.anchorUsed)} kr (fra ${nf(p.cappedFrom)} kr)`);
+  out.push('');
+
+  // ── 6b. FINN-ANNONSE (aktiv på finn.no) ──────────────────────
+  out.push(B('FINN-ANNONSE'));
+  if (p.finnListing && p.finnListing.link) {
+    const fl = p.finnListing;
+    out.push(`${E(fl.status || 'Til salgs')}${fl.price ? ' – ' + nf(fl.price) + ' kr' : ''}`);
+    out.push(forErp ? fl.link : `<a href="${esc(fl.link)}">Åpne annonse på Finn</a>`);
+  } else {
+    out.push('Ikke aktiv på Finn');
+  }
+  out.push('');
+
+  // ── 7. KALKYLE (Easy calcValuation — fasit som skrives til ERP) ─
+  const spreadStr = val.spreadPct != null ? `±${(val.spreadPct * 100).toFixed(1)}%` : '?';
+  const kalkyleBody = [
+    `Bracket: ${val.bracket || '?'}`,
+    `Segment: ${seg.segment || '?'} (${spreadStr})`,
+    `Anker:   ${rpad(p.anchorUsed != null ? p.anchorUsed : ab.anker)} kr`,
+    `- Margin:${rpad(val.margin)} kr`,
+    `= Brutto:${rpad(val.T)} kr`,
+    `- Fee:   ${rpad(val.fee)} kr`,
+    `= D mid: ${rpad(val.dMid)} kr`,
+    `D lav:   ${rpad(val.dLav)} kr`,
+    `D høy:   ${rpad(val.dHoy)} kr`,
+    ...(val.compCapApplied ? [`🛡️ Comp-cap: D høy klippet til laveste comp × 0.95`] : []),
+  ].join('\n');
+  out.push(B('KALKYLE'));
+  out.push(forErp ? kalkyleBody : `<pre>${esc(kalkyleBody)}</pre>`);
+  out.push('');
+
+  // ── 8. Confidence + begrunnelse ──────────────────────────────
+  out.push(B(`Confidence: ${anchor.confidence != null ? anchor.confidence : '?'}/100`));
+  if (anchor.begrunnelse_kort) out.push(forErp ? anchor.begrunnelse_kort : I(E(anchor.begrunnelse_kort)));
+  out.push('');
+
+  // ── 9. RISIKO ────────────────────────────────────────────────
+  if (Array.isArray(anchor.risiko_flagg) && anchor.risiko_flagg.length) {
+    out.push(B('RISIKO'));
+    anchor.risiko_flagg.forEach(r => out.push(`* ${E(r)}`));
+    out.push('');
+  }
+
+  // ── 10. HEFTELSER ────────────────────────────────────────────
+  out.push(B('HEFTELSER'));
+  out.push(p.brreg && p.brreg.anyDebts
+    ? `⚠️ ${E(p.brreg.text || 'Heftelser registrert – sjekk manuelt')}`
+    : '✅ Ingen heftelser');
+  out.push('');
+
+  // ── 11. SELGERKOMMENTAR (kun ekte biler) ─────────────────────
+  if (bil.id && p.sdComment) {
+    out.push(B('SELGERKOMMENTAR'));
+    out.push(E(p.sdComment));
+    out.push('');
+  }
+
+  // ── 12. ERP STATUS (kun ekte biler) ──────────────────────────
+  if (bil.id) {
+    const v = p.erpVerify || {};
+    const statusFlags = [
+      p.erpWritten ? '✅ D lav/høy skrevet' : '❌ D lav/høy feilet',
+      (p.erpWritten || v.auctionType) ? '✅ Auction type satt' : '❌ Auction type feilet',
+      p.chatPosted ? '✅ Eval-kort postet' : '— Eval-kort ikke postet',
+    ].join(' | ');
+    out.push(B('ERP STATUS'));
+    out.push(statusFlags);
+  }
+
+  // ── Telegram-fot: lenke til ERP ──────────────────────────────
+  let text = out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (!forErp && bil.id) {
+    text += `\n<a href="https://biladministrasjon.no/cars_driveno/processing/final_estimate/${bil.id}">Åpne i ERP</a>`;
+  }
+  return text;
+}
+
+module.exports = { formatEvalCardHybrid };

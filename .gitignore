@@ -1,0 +1,8 @@
+.env
+*.bak
+nohup.out
+logs/
+peasy-cache.json
+auction-seen.json
+ews_dump.js
+peasy-auto.js.bak

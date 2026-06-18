@@ -1,0 +1,7 @@
+[dotenv@17.3.1] injecting env (29) from .env -- tip: ⚙️  override existing env vars with { override: true }
+[2026-06-15T11:30:02.107Z] [v20.42] Peasy Auto v20.42 starter
+[2026-06-15T11:30:02.107Z] [v20.42] Cache: 827 biler allerede skrevet
+[2026-06-15T11:30:02.113Z] [v20.42] [webhook] lytter på 0.0.0.0:7780 (token-lengde=48)
+[2026-06-15T11:30:02.259Z] [v20.42] === Starter kjoring ===
+[2026-06-15T11:30:02.281Z] [v20.42] Brackets: lastet fra Pulse
+[2026-06-15T11:30:02.281Z] [v20.42] ERP: logger inn...

@@ -1,0 +1,122 @@
+{
+  "EP22492": {
+    "timestamp": "2026-03-17T15:10:05.215Z",
+    "make": "TESLA",
+    "model": "Model 3",
+    "year": 2019,
+    "finnAvg": 233922,
+    "lowestComp": 199000,
+    "dLow": 157000,
+    "dHigh": 173000
+  },
+  "DN70957": {
+    "timestamp": "2026-03-18T09:00:51.373Z",
+    "make": "VOLKSWAGEN",
+    "model": "GOLF",
+    "year": 2011,
+    "finnAvg": 75844,
+    "lowestComp": 59742,
+    "dLow": 42000,
+    "dHigh": 46000
+  },
+  "EH99581": {
+    "timestamp": "2026-03-18T09:01:03.205Z",
+    "make": "BYD",
+    "model": "Tang",
+    "year": 2022,
+    "finnAvg": 393492,
+    "lowestComp": 368000,
+    "dLow": 298000,
+    "dHigh": 330000
+  },
+  "UX68619": {
+    "timestamp": "2026-03-18T07:01:33.841Z",
+    "make": "FORD",
+    "model": "Ranger",
+    "year": 2017,
+    "finnAvg": 327024,
+    "lowestComp": 290553,
+    "dLow": 234000,
+    "dHigh": 258000
+  },
+  "HJ96048": {
+    "timestamp": "2026-03-18T07:00:53.061Z",
+    "make": "MAZDA",
+    "model": "CX-5",
+    "year": 2015,
+    "finnAvg": 157709,
+    "lowestComp": 149000,
+    "dLow": 115000,
+    "dHigh": 127000
+  },
+  "EL74473": {
+    "timestamp": "2026-03-18T09:01:32.978Z",
+    "make": "NISSAN",
+    "model": "LEAF",
+    "year": 2012,
+    "finnAvg": 29355,
+    "lowestComp": 21942,
+    "dLow": 6000,
+    "dHigh": 6000
+  },
+  "RL38352": {
+    "timestamp": "2026-03-17T21:16:47.434Z",
+    "make": "LEXUS",
+    "model": "ES300H",
+    "year": 2019,
+    "finnAvg": 439900,
+    "lowestComp": 439900,
+    "dLow": 358000,
+    "dHigh": 396000
+  },
+  "AA71657": {
+    "timestamp": "2026-03-18T07:01:09.137Z",
+    "make": "VOLVO",
+    "model": "XC90",
+    "year": 2019,
+    "finnAvg": 495622,
+    "lowestComp": 459900,
+    "dLow": 375000,
+    "dHigh": 415000
+  },
+  "EE25445": {
+    "timestamp": "2026-03-18T09:01:55.902Z",
+    "make": "BMW",
+    "model": "X3",
+    "year": 2022,
+    "finnAvg": 542257,
+    "lowestComp": 558900,
+    "dLow": 458000,
+    "dHigh": 506000
+  },
+  "DR12104": {
+    "timestamp": "2026-03-18T09:02:09.578Z",
+    "make": "BMW",
+    "model": "225xe Active Tourer",
+    "year": 2016,
+    "finnAvg": 144437,
+    "lowestComp": 138800,
+    "dLow": 108000,
+    "dHigh": 120000
+  },
+  "EE43367": {
+    "timestamp": "2026-03-18T09:02:26.690Z",
+    "make": "VOLKSWAGEN",
+    "model": "ID.4 PRO 150 KW",
+    "year": 2022,
+    "finnAvg": 298059,
+    "lowestComp": 289999,
+    "dLow": 233000,
+    "dHigh": 257000
+  },
+  "BT82695": {
+    "timestamp": "2026-03-18T09:02:37.926Z",
+    "make": "VOLKSWAGEN",
+    "model": "POLO",
+    "year": 2018,
+    "finnAvg": 132957,
+    "lowestComp": 119970,
+    "dLow": 93000,
+    "dHigh": 103000
+  }
+}

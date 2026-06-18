@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.peasy.auto</string>
+
+  <!-- Hva som kjores: absolutt node-sti (launchd laster ikke nvm/shell-profil) -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/bot/.nvm/versions/node/v24.14.0/bin/node</string>
+    <string>/Users/bot/peasy-auto/peasy-auto.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/bot/peasy-auto</string>
+
+  <!-- Start ved innlogging/boot -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart ALLTID hvis prosessen avslutter (krasj, exit, drept) -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Minst 10s mellom restarter (unngaar krasj-loop-spam) -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <!-- All stdout/stderr til samme logg som for -->
+  <key>StandardOutPath</key>
+  <string>/Users/bot/peasy-auto/logs/out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/bot/peasy-auto/logs/out.log</string>
+
+  <!-- nvm-node forst i PATH (for evt. child-prosesser / xlsx / playwright) -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/bot/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

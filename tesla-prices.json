@@ -1,0 +1,146 @@
+{
+  "LRW3192_613e7d7e27d23acfdb41567d823f0052": {
+    "finalPrice": 333217,
+    "trimName": "Bakhjulsdrift",
+    "color": "Perlemorshvit",
+    "discount": 0
+  },
+  "LRW3192_46e88f86f6bcce5a827742b0a1a5f693": {
+    "finalPrice": 348217,
+    "trimName": "Bakhjulsdrift",
+    "color": "DIAMOND_BLACK",
+    "discount": 0
+  },
+  "LRW3192_a5281902bf3670e004e865d928f1bc8a": {
+    "finalPrice": 348217,
+    "trimName": "Bakhjulsdrift",
+    "color": "GREY",
+    "discount": 0
+  },
+  "LRW3204_292b756e7e04cb91251d9fb28018ecc5": {
+    "finalPrice": 361967,
+    "trimName": "Bakhjulsdrift",
+    "color": "GREY",
+    "discount": 0
+  },
+  "LRW3204_c610c4ee01b87239df325210aed237d6": {
+    "finalPrice": 361967,
+    "trimName": "Bakhjulsdrift",
+    "color": "DIAMOND_BLACK",
+    "discount": 0
+  },
+  "LRW3204_98953bcfba8f0b38dde895ec329e1425": {
+    "finalPrice": 409764,
+    "trimName": "Premium bakhjulsdrift",
+    "color": "DIAMOND_BLACK",
+    "discount": 24988
+  },
+  "LRW3204_83c3ee129a4af194f8c9a95ee635251d": {
+    "finalPrice": 412889,
+    "trimName": "Premium bakhjulsdrift",
+    "color": "Solv",
+    "discount": 24988
+  },
+  "LRW3204_38642bd44e8cf753327c78d8769c6252": {
+    "finalPrice": 457789,
+    "trimName": "Premium Long Range bakhjulsdrift",
+    "color": "GREY",
+    "discount": 0
+  },
+  "LRW3192_de5a3ae2ad8332b2dc273133e5c44637": {
+    "finalPrice": 460914,
+    "trimName": "Premium Long Range bakhjulsdrift",
+    "color": "GREY",
+    "discount": 0
+  },
+  "LRW3192_24b4098d326b46c8310e10e2e209abb8": {
+    "finalPrice": 465518,
+    "trimName": "Premium Long Range firehjulsdrift",
+    "color": "Perlemorshvit",
+    "discount": 0
+  },
+  "LRW3204_1cd082ceef4936c68661ca45e048f417": {
+    "finalPrice": 479268,
+    "trimName": "Premium Long Range firehjulsdrift",
+    "color": "Perlemorshvit",
+    "discount": 0
+  },
+  "LRW3192_1586bac7aa8e6e41b7fd9c69f87de90e": {
+    "finalPrice": 480518,
+    "trimName": "Premium Long Range firehjulsdrift",
+    "color": "DIAMOND_BLACK",
+    "discount": 0
+  },
+  "LRW3192_62191bfc250ba45eb7872f7eb7e88576": {
+    "finalPrice": 482393,
+    "trimName": "Premium Long Range firehjulsdrift",
+    "color": "Perlemorshvit",
+    "discount": 0
+  },
+  "LRW3204_732f70e566e6bb907fe461bd23abc3a6": {
+    "finalPrice": 494268,
+    "trimName": "Premium Long Range firehjulsdrift",
+    "color": "DIAMOND_BLACK",
+    "discount": 0
+  },
+  "LRW3192_e07df4473c03e40555224c313cd7c3df": {
+    "finalPrice": 497393,
+    "trimName": "Premium Long Range firehjulsdrift",
+    "color": "DIAMOND_BLACK",
+    "discount": 0
+  },
+  "LRW3204_f5be23e48bbc6d390fcc8921ea639f85": {
+    "finalPrice": 501768,
+    "trimName": "Premium Long Range firehjulsdrift",
+    "color": "Rod multi-coat",
+    "discount": 0
+  },
+  "LRW3204_f64d21e96a57da4f45c1c21847e6bbf8": {
+    "finalPrice": 508643,
+    "trimName": "Premium Long Range firehjulsdrift",
+    "color": "Perlemorshvit",
+    "discount": 0
+  },
+  "LRW3190_220c8cc929910256b61a7b58c8937dfa": {
+    "finalPrice": 584399,
+    "trimName": "Performance firehjulsdrift",
+    "color": "Perlemorshvit",
+    "discount": 0
+  },
+  "LRW3190_73e3bc0b9571bd714f49d1316d0ac093": {
+    "finalPrice": 599399,
+    "trimName": "Performance firehjulsdrift",
+    "color": "DIAMOND_BLACK",
+    "discount": 0
+  },
+  "LRW3190_944eaa426b8adc7b89d80458a314f959": {
+    "finalPrice": 599399,
+    "trimName": "Performance firehjulsdrift",
+    "color": "GREY",
+    "discount": 0
+  },
+  "LRW3190_aa8b534cad6285413865b3d1ca2e3f32": {
+    "finalPrice": 599399,
+    "trimName": "Performance firehjulsdrift",
+    "color": "Dypbla metallic",
+    "discount": 0
+  },
+  "LRW3190_1bd40592d1112f7d8ed82e860ec81993": {
+    "finalPrice": 606899,
+    "trimName": "Performance firehjulsdrift",
+    "color": "Rod multi-coat",
+    "discount": 0
+  },
+  "LRW3190_b08b7b1a6763213cfb942efef482be91": {
+    "finalPrice": 606899,
+    "trimName": "Performance firehjulsdrift",
+    "color": "Solv",
+    "discount": 0
+  },
+  "LRW3190_5196c55c85b4f14cef6c17497607c631": {
+    "finalPrice": 611899,
+    "trimName": "Performance firehjulsdrift",
+    "color": "DIAMOND_BLACK",
+    "discount": 0
+  }
+}

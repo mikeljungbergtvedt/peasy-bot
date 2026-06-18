@@ -1,0 +1,15 @@
+[dotenv@17.3.1] injecting env (25) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+[2026-05-19T08:47:22.613Z] [v19.17] Peasy Auto v19.17 starter
+[2026-05-19T08:47:22.614Z] [v19.17] Cache: 354 biler allerede skrevet
+[2026-05-19T08:47:22.744Z] [v19.17] === Starter kjoring ===
+[2026-05-19T08:47:22.771Z] [v19.17] Brackets: lastet fra Pulse
+[2026-05-19T08:47:22.772Z] [v19.17] ERP: logger inn...
+[2026-05-19T08:47:22.920Z] [v19.17] ERP: innlogget OK
+[2026-05-19T08:47:22.976Z] [v19.17] Body types: 10 typer lastet
+[2026-05-19T08:47:22.976Z] [v19.17] ERP: henter liste 3...
+[2026-05-19T08:47:25.671Z] [v19.17] KM-cache: 1854 biler fra XLSX
+[2026-05-19T08:47:25.671Z] [v19.17] ERP: 0 biler pa liste 3
+[2026-05-19T08:47:25.671Z] [v19.17] Ingen biler pa liste 3 — sjekker liste 2 likevel
+[2026-05-19T08:47:26.431Z] [v19.17] ERP: 0 biler pa liste 2
+[2026-05-19T08:47:26.451Z] [v19.17] FEIL [checkStuckCars in runOnce] checkStuckCars is not defined
+[2026-05-19T08:47:26.451Z] [v19.17] === Kjoring ferdig ===
