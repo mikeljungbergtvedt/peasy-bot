@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.57';
+const VERSION = 'v20.58';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -835,7 +835,9 @@ function buildFinnUrl(make, model, yearFrom, yearTo, vegData, opts = {}) {
     .replace(/JAGUAR LAND ROVER LIMITED/i, 'Land Rover')
     .trim();
   const pkgSuffix = opts.package ? ' ' + opts.package : '';
-  const q = encodeURIComponent((cleanMake + " " + (model || "")).trim());
+  // v20.58: rens modell for Finn-fritekst (fjern variant/girkasse-stoy som blokkerer treff)
+  const modelForQ = cleanModelSeries(make, model || '');
+  const q = encodeURIComponent((cleanMake + " " + modelForQ).trim());
 
   const hk = Math.round((vegData.kw || 0) * 1.36);
   const hkFrom = hk > 0 ? Math.floor(hk * 0.85 / 10) * 10 : 0;
