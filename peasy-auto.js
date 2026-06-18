@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.56';
+const VERSION = 'v20.57';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -541,24 +541,13 @@ async function confirmFinalEstimate(erpId, token) {
 async function getCarInfoFetch(regnr) {
   const url = `https://www.car.info/no-no/license-plate/N/${regnr.replace(/\s/g,'')}`;
   try {
-    let html;
-    if (page) {
-      // v20.55: hent via browser-context (Cloudflare-clearance) -> unngaar 403
-      html = await page.evaluate(async (u) => {
-        const rr = await fetch(u, { headers: { 'Accept': 'text/html', 'Accept-Language': 'nb-NO,nb;q=0.9,no;q=0.8,en;q=0.7' } });
-        if (!rr.ok) return '__HTTP_' + rr.status + '__';
-        return await rr.text();
-      }, url);
-      if (typeof html === 'string' && html.startsWith('__HTTP_')) { log(`elbilradar ${html.replace(/__/g,'').replace('HTTP_','')}`); return null; }
-    } else {
-      const r = await fetch(url, { headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-        'Accept-Language': 'nb-NO,nb;q=0.9,no;q=0.8,en;q=0.7',
-        'Accept': 'text/html'
-      } });
-      if (!r.ok) { log(`elbilradar ${r.status}`); return null; }
-      html = await r.text();
-    }
+    const r = await fetch(url, { headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      'Accept-Language': 'nb-NO,nb;q=0.9,no;q=0.8,en;q=0.7',
+      'Accept': 'text/html'
+    } });
+    if (!r.ok) { log(`car.info ${r.status}`); return null; }
+    const html = await r.text();
     const titleM = html.match(/<title>([^<]+)<\/title>/i);
     const title = titleM ? titleM[1].trim() : '';
     let variant = '';
@@ -632,13 +621,24 @@ function parseElbilradarFields(html) {
 async function getElbilradarFetch(regnr, page) {
   const url = `https://elbilradar.com/elbil_data.php?regnr=${regnr.replace(/\s/g,'')}`;
   try {
-    const r = await fetch(url, { headers: {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      'Accept-Language': 'nb-NO,nb;q=0.9,no;q=0.8,en;q=0.7',
-      'Accept': 'text/html'
-    } });
-    if (!r.ok) { log(`elbilradar ${r.status}`); return null; }
-    const html = await r.text();
+    let html;
+    if (page) {
+      // v20.57: hent via browser-context (Cloudflare-clearance) -> unngaar 403
+      html = await page.evaluate(async (u) => {
+        const rr = await fetch(u, { headers: { 'Accept': 'text/html', 'Accept-Language': 'nb-NO,nb;q=0.9,no;q=0.8,en;q=0.7' } });
+        if (!rr.ok) return '__HTTP_' + rr.status + '__';
+        return await rr.text();
+      }, url);
+      if (typeof html === 'string' && html.startsWith('__HTTP_')) { log(`elbilradar ${html.replace(/__/g,'').replace('HTTP_','')}`); return null; }
+    } else {
+      const r = await fetch(url, { headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept-Language': 'nb-NO,nb;q=0.9,no;q=0.8,en;q=0.7',
+        'Accept': 'text/html'
+      } });
+      if (!r.ok) { log(`elbilradar ${r.status}`); return null; }
+      html = await r.text();
+    }
     const decoded = html.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
     const variantMatch = decoded.match(/>([A-Z][A-Za-z0-9 -]+?(?: [A-Za-z0-9-]+){1,4}\/[^<>\n]+(?:\/[^<>\n]+){1,8})</);
     let variantRaw = variantMatch ? variantMatch[1].trim() : null;
