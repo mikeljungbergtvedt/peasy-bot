@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.60';
+const VERSION = 'v20.59';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -984,7 +984,7 @@ function getFinnBodyType(karosseri) {
 //   2a km -> 2b drivstoff (skip hybrid) -> 2c drivtype -> 2d karosseri -> 2e kW
 //   Stopp funnel ved <5 treff. funnelSteps[] returnert.
 //   finnUrl = URL til siste godkjente steg (comps-kilde).
-async function getFinnComps(bil, vegData, page, overrideUrl = null) {
+async function getFinnComps(bil, vegData, page) {
   const erpYear = bil.model_year || 0;
   const vegYear = vegData.firstRegYear || 0;
   let yBase = erpYear;
@@ -1000,22 +1000,7 @@ async function getFinnComps(bil, vegData, page, overrideUrl = null) {
   const KM_BAND  = { premium: 30000, mid: 40000, highkm: 50000, old: 80000, special: 80000 };
   const kmBand   = KM_BAND[seg.segment] || 50000;
   const kmTo     = (bil.mileage || 0) + kmBand;  const kmFrom   = Math.max(0, (bil.mileage || 0) - kmBand);
-
-  if (overrideUrl) {
-    log('Finn: QA-URL override -> scraper direkte: ' + overrideUrl);
-    const ov = await scrapeFinnUrl(overrideUrl, page);
-    const ovComps = (ov && ov.comps) || [];
-    if (ovComps.length === 0) { log('Finn: QA-URL ga 0 comps'); return { pool: [], finnUrl: overrideUrl, totalCount: (ov && ov.totalCount) || 0, seg: seg, funnelSteps: [{ label: 'QA-URL override', treff: (ov && ov.totalCount) || 0, stopp: true }] }; }
-    let ovPool = ovComps;
-    for (const band of [kmBand, kmBand * 1.5, kmBand * 2, 999999]) {
-      const f = ovComps.filter(c => Math.abs(c.km - (bil.mileage || 0)) <= band);
-      if (f.length >= 3) { ovPool = f; break; }
-    }
-    ovPool.sort((a, b) => a.price - b.price);
-    log('Finn: QA-URL pool = ' + ovPool.length + ' biler');
-    return { pool: ovPool, finnUrl: overrideUrl, totalCount: (ov && ov.totalCount) || ovComps.length, seg: seg, funnelSteps: [{ label: 'QA-URL override', treff: (ov && ov.totalCount) || ovComps.length, stopp: false }] };
-  }
-    const bodyType = getFinnBodyType(vegData.karosseri);
+  const bodyType = getFinnBodyType(vegData.karosseri);
   const isHybrid = vegData.isHybrid || false;
 
   const funnelSteps = [];
@@ -1966,7 +1951,7 @@ async function evalCar(bil, page, cache, opts = {}) {
       // FALLBACK: v2 feilet -> gammel Finn-motor, tydelig merket for ekstra QA
       log('FALLBACK ' + regnr + ': v2 feilet (' + v2feil + ') - prover Finn-motor');
       try {
-        const rF = await getFinnComps(bil, vegData, page, qaOverrideUrl);
+        const rF = await getFinnComps(bil, vegData, page);
         const poolF = (rF && rF.pool) || [];
         if (poolF.length === 0) {
           { const mc = buildManualCard(regnr, erpId, bil, vegData, 'v2 feilet: ' + v2feil + ' / ingen Finn-comps'); await sendTelegram(mc.text, mc.kb); }
