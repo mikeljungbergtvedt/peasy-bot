@@ -1,8 +1,9 @@
 {
   "active": false,
-  "notified": false,
-  "startedAt": "2026-06-19T07:32:42.216Z",
+  "notified": true,
+  "startedAt": "2026-06-19T08:00:42.844Z",
   "snapshotIds": [
-    3263
-  ]
+    3276
+  ],
+  "finishedAt": "2026-06-19T08:01:37.492Z"
 }

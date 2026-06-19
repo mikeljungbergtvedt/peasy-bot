@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.63';
+const VERSION = 'v20.62';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2155,17 +2155,6 @@ async function evalCar(bil, page, cache, opts = {}) {
 }
 
 // ── Kjoring ───────────────────────────────────────────────────
-const nodemailer = require('nodemailer');
-const FLUSH_MAIL_TO = 'mike@autoringen.no';
-async function sendMail(subject, body) {
-  try {
-    const user = process.env.IMAP_USER || process.env.EMAIL_USER;
-    const t = nodemailer.createTransport({ host: 'exchange.tornado.email', port: 587, secure: false, auth: { user, pass: process.env.IMAP_PASS }, connectionTimeout: 10000, greetingTimeout: 10000 });
-    const info = await t.sendMail({ from: 'Peasy Bot <' + user + '>', to: FLUSH_MAIL_TO, subject, text: body });
-    log('mail sendt til ' + FLUSH_MAIL_TO + ': ' + info.response);
-    return true;
-  } catch (e) { logErr('sendMail', e); return false; }
-}
 // Aktive biler i pipe (liste 2-13), EKSKLUDERER new_cars. Kilde: driveno_* tellere fra ERP.
 const FLUSH_ACTIVE_STATUSES = ['on_auction','on_the_way','order_delivery','ready_for_auction','waiting_for_preparation'];
 async function getActivePipeCount() {
@@ -2206,7 +2195,6 @@ async function checkFlushWatch(cache) {
     w.notified = true; w.active = false; w.finishedAt = new Date().toISOString();
     saveFlushWatch(w);
     await sendTelegram('\u2705 <b>VILKAR-FLUSH FERDIG</b>\n\nAlle ' + baseline + ' biler registrert under gamle vilkar er ferdigbehandlet (flushet gjennom).\n\nDu kan na trygt aktivere de nye prisene/vilkarene.', false);
-    await sendMail('VILKAR-FLUSH FERDIG - alle gamle biler gjennom', 'Alle ' + baseline + ' biler registrert under gamle vilkar er ferdigbehandlet (flushet gjennom).\n\nDu kan na trygt aktivere de nye prisene/vilkarene.');
     log('flush-watch: FERDIG - varsel sendt');
   }
 }
