@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.64';
+const VERSION = 'v20.63';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2811,7 +2811,6 @@ async function checkListeWatch() {
     if (seksjoner.length) {
       await sendTelegram('📋 <b>STUCK-OVERSIKT ' + hhmm + '</b> — ' + totalt + ' biler står på vent\n\n' + seksjoner.join('\n\n'));
       log('Stuck-oversikt sendt: ' + totalt + ' biler');
-      await sendMail('STUCK-OVERSIKT ' + hhmm + ' - ' + totalt + ' biler staar paa vent', 'STUCK-OVERSIKT ' + hhmm + ' - ' + totalt + ' biler staar paa vent\n\n' + seksjoner.join('\n\n').replace(/<\/?b>/g, ''));
     } else {
       log('Stuck-oversikt: ingen biler på liste 8-12');
     }
