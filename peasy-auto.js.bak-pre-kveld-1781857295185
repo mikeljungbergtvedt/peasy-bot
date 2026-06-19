@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.65';
+const VERSION = 'v20.64';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2594,7 +2594,7 @@ async function sendKveldspuls() {
     const ep7     = af7.length > 0 ? Math.round(pq7.length / af7.length * 100) : 0;
     const bp7     = done7 > 0 ? Math.round(solgt7.length / done7 * 100) : 0;
 
-    const ep7ikon = ep7 >= 15 ? 'OK' : ep7 >= 10 ? 'NAR' : 'UNDER';
+    const ep7ikon = ep7 >= 20 ? 'OK' : ep7 >= 15 ? 'NAR' : 'UNDER';
     const bp7ikon = bp7 >= 70 ? 'OK' : bp7 >= 60 ? 'NAR' : 'UNDER';
 
     const dagsNavn = today.toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -2609,11 +2609,10 @@ async function sendKveldspuls() {
       'Mottatt pa anlegg:  <b>' + mottattToday + '</b>\n' +
       'Solgt pa auksjon:   <b>' + solgtToday + '</b>\n' +
       'Returnert:          <b>' + retToday + '</b>\n\n' +
-      'Eval-aksept 7d: <b>' + ep7 + '%</b> [' + ep7ikon + '] mal 15%\n' +
+      'Eval-aksept 7d: <b>' + ep7 + '%</b> [' + ep7ikon + '] mal 20%\n' +
       'Bud-aksept 7d:  <b>' + bp7 + '%</b> [' + bp7ikon + '] mal 70%';
 
     await sendTelegram(melding);
-    await sendMail('Peasy Pulse ' + dagsNamnCap, melding.replace(/<\/?b>/g, ''));
     log('Kveldspuls: sendt OK');
 
     // Oppdater peasy-brackets.json med live X%-verdier fra XLSX
