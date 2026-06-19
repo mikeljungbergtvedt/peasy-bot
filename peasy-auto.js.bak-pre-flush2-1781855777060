@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.62';
+const VERSION = 'v20.61';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2155,19 +2155,6 @@ async function evalCar(bil, page, cache, opts = {}) {
 }
 
 // ── Kjoring ───────────────────────────────────────────────────
-// Aktive biler i pipe (liste 2-13), EKSKLUDERER new_cars. Kilde: driveno_* tellere fra ERP.
-const FLUSH_ACTIVE_STATUSES = ['on_auction','on_the_way','order_delivery','ready_for_auction','waiting_for_preparation'];
-async function getActivePipeCount() {
-  const token = await getErpToken();
-  const res = await fetch(`${CONFIG.erp.base}/c2b_module/peasy/processing/sd_received?per_page=99`, { headers: authH(token) });
-  const j = await res.json();
-  let counts = null;
-  (function find(o){ if(counts||typeof o!=='object'||!o) return; if('driveno_sold' in o){counts=o;return;} for(const k in o) find(o[k]); })(j);
-  if(!counts) return null;
-  let total = 0;
-  for(const st of FLUSH_ACTIVE_STATUSES) total += (counts['driveno_'+st]||0);
-  return total;
-}
 const FLUSH_WATCH_FILE = '/Users/bot/peasy-auto/flush-watch.json';
 function loadFlushWatch() {
   try { return JSON.parse(fs.readFileSync(FLUSH_WATCH_FILE, 'utf8')); }
@@ -2182,19 +2169,16 @@ function flushWatchProgress(w, cache) {
   const remainingIds = ids.filter(id => !cache[id]);
   return { total: ids.length, remaining: remainingIds.length, remainingIds };
 }
-// Kalles hver kjoring fra pushPulseStatus. Varsler EN gang naar pipe er flushet (aktive=0, ekskl. new_cars).
+// Kalles hver kjoring fra pushPulseStatus. Varsler EN gang naar alt er flushet.
 async function checkFlushWatch(cache) {
   const w = loadFlushWatch();
   if (!w.active || w.notified) return;
-  let active;
-  try { active = await getActivePipeCount(); } catch(e){ logErr('flush-watch count', e); return; }
-  if (active === null) { log('flush-watch: kunne ikke lese aktive tellere'); return; }
-  const baseline = w.baseline || 0;
-  log('flush-watch: ' + (baseline - active) + '/' + baseline + ' flushet, ' + active + ' aktive igjen');
-  if (active === 0) {
+  const prog = flushWatchProgress(w, cache);
+  log('flush-watch: ' + (prog.total - prog.remaining) + '/' + prog.total + ' ferdig, ' + prog.remaining + ' gjenstaar');
+  if (prog.remaining === 0) {
     w.notified = true; w.active = false; w.finishedAt = new Date().toISOString();
     saveFlushWatch(w);
-    await sendTelegram('\u2705 <b>VILKAR-FLUSH FERDIG</b>\n\nAlle ' + baseline + ' biler registrert under gamle vilkar er ferdigbehandlet (flushet gjennom).\n\nDu kan na trygt aktivere de nye prisene/vilkarene.', false);
+    await sendTelegram('\u2705 <b>VILKAR-FLUSH FERDIG</b>\n\nAlle ' + prog.total + ' biler registrert under gamle vilkar er ferdigbehandlet (flushet gjennom).\n\nDu kan na trygt aktivere de nye prisene/vilkarene.', false);
     log('flush-watch: FERDIG - varsel sendt');
   }
 }
@@ -2475,30 +2459,29 @@ async function pollTelegramCommands(cache) {
         }
       }
       if (text.startsWith('/flushwatch')) {
-      const arg = text.replace('/flushwatch', '').trim().toLowerCase();
-      try {
-        if (arg === 'on' || arg === 'start') {
-          const active = await getActivePipeCount();
-          if (active === null) { await sendTelegram('\u274c Kunne ikke lese aktive tellere fra ERP.', false); continue; }
-          const w = { active: true, notified: false, startedAt: new Date().toISOString(), baseline: active };
-          saveFlushWatch(w);
-          await sendTelegram('\u2705 <b>Vilkar-flush-vakt startet</b>\n\nOvervaaker ' + active + ' aktive biler i pipe (liste 2-13, ekskl. nye usolgte).\nDu faar varsel naar ALLE er ferdigbehandlet (aktive = 0).\n\nBruk /flushwatch for status, /flushwatch off for aa stoppe.', false);
-        } else if (arg === 'off' || arg === 'stop') {
-          const w = loadFlushWatch(); w.active = false; saveFlushWatch(w);
-          await sendTelegram('\ud83d\uded1 Vilkar-flush-vakt stoppet.', false);
-        } else {
-          const w = loadFlushWatch();
-          if (!w.active && !w.baseline) {
-            await sendTelegram('\u2139\ufe0f Ingen vilkar-flush-vakt aktiv.\nStart med /flushwatch on.', false);
+        const arg = text.replace('/flushwatch', '').trim().toLowerCase();
+        try {
+          if (arg === 'on' || arg === 'start') {
+            const biler = await getListe3();
+            const ids = (biler || []).map(b => b.id);
+            const w = { active: true, notified: false, startedAt: new Date().toISOString(), snapshotIds: ids };
+            saveFlushWatch(w);
+            await sendTelegram('\u2705 <b>Vilkar-flush-vakt startet</b>\n\nOvervaaker ' + ids.length + ' biler (gamle vilkar) som naa er i pipe/produksjon.\nDu faar varsel naar ALLE er ferdigbehandlet.\n\nBruk /flushwatch for status, /flushwatch off for aa stoppe.', false);
+          } else if (arg === 'off' || arg === 'stop') {
+            const w = loadFlushWatch(); w.active = false; saveFlushWatch(w);
+            await sendTelegram('\ud83d\uded1 Vilkar-flush-vakt stoppet.', false);
           } else {
-            const active = await getActivePipeCount();
-            const baseline = w.baseline || 0;
-            const done = active === null ? '?' : (baseline - active);
-            await sendTelegram('\ud83d\udcca <b>Vilkar-flush status</b>\n\nBaseline: ' + baseline + ' aktive\nFlushet: ' + done + '\nGjenstaar: ' + (active === null ? '?' : active) + (w.active ? '' : ' (vakt AV)') + ((active === 0) ? '\n\n\u2705 Alle ferdige!' : ''), false);
+            const w = loadFlushWatch();
+            if (!w.active && !(w.snapshotIds && w.snapshotIds.length)) {
+              await sendTelegram('\u2139\ufe0f Ingen vilkar-flush-vakt aktiv.\nStart med /flushwatch on (tar snapshot av biler under gamle vilkar).', false);
+            } else {
+              const prog = flushWatchProgress(w, cache);
+              const remList = prog.remainingIds.slice(0, 20).join(', ') + (prog.remainingIds.length > 20 ? ' ...' : '');
+              await sendTelegram('\ud83d\udcca <b>Vilkar-flush status</b>\n\nSnapshot: ' + prog.total + ' biler\nFerdig: ' + (prog.total - prog.remaining) + '\nGjenstaar: ' + prog.remaining + (w.active ? '' : ' (vakt AV)') + (prog.remaining ? '\n\nGjenstaaende intern-nr: ' + remList : '\n\n\u2705 Alle ferdige!'), false);
+            }
           }
-        }
-      } catch (e) { await sendTelegram('\u274c /flushwatch feil: ' + e.message, false); }
-      continue;
+        } catch (e) { await sendTelegram('\u274c /flushwatch feil: ' + e.message, false); }
+        continue;
       }
       if (text.startsWith('/finn ')) {
           log('/finn mottatt: ' + text);
