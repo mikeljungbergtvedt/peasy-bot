@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.61';
+const VERSION = 'v20.60';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2155,34 +2155,6 @@ async function evalCar(bil, page, cache, opts = {}) {
 }
 
 // ── Kjoring ───────────────────────────────────────────────────
-const FLUSH_WATCH_FILE = '/Users/bot/peasy-auto/flush-watch.json';
-function loadFlushWatch() {
-  try { return JSON.parse(fs.readFileSync(FLUSH_WATCH_FILE, 'utf8')); }
-  catch (e) { return { active: false, snapshotIds: [], notified: false, startedAt: null }; }
-}
-function saveFlushWatch(w) {
-  try { fs.writeFileSync(FLUSH_WATCH_FILE, JSON.stringify(w, null, 2)); } catch (e) { logErr('flush-watch save', e); }
-}
-// Returnerer { total, remaining, remainingIds } for snapshotet mot cache
-function flushWatchProgress(w, cache) {
-  const ids = (w && w.snapshotIds) || [];
-  const remainingIds = ids.filter(id => !cache[id]);
-  return { total: ids.length, remaining: remainingIds.length, remainingIds };
-}
-// Kalles hver kjoring fra pushPulseStatus. Varsler EN gang naar alt er flushet.
-async function checkFlushWatch(cache) {
-  const w = loadFlushWatch();
-  if (!w.active || w.notified) return;
-  const prog = flushWatchProgress(w, cache);
-  log('flush-watch: ' + (prog.total - prog.remaining) + '/' + prog.total + ' ferdig, ' + prog.remaining + ' gjenstaar');
-  if (prog.remaining === 0) {
-    w.notified = true; w.active = false; w.finishedAt = new Date().toISOString();
-    saveFlushWatch(w);
-    await sendTelegram('\u2705 <b>VILKAR-FLUSH FERDIG</b>\n\nAlle ' + prog.total + ' biler registrert under gamle vilkar er ferdigbehandlet (flushet gjennom).\n\nDu kan na trygt aktivere de nye prisene/vilkarene.', false);
-    log('flush-watch: FERDIG - varsel sendt');
-  }
-}
-
 async function pushPulseStatus(biler, cache) {
   const venter = (biler || []).filter(b => !cache[b.id]).length;
   const rec = { liste3: (biler || []).length, venter: venter, timestamp: new Date().toISOString() };
@@ -2199,7 +2171,6 @@ async function pushPulseStatus(biler, cache) {
   const putData = await putRes.json();
   if (putData.content) log('pulse-status: liste3=' + rec.liste3 + ' venter=' + venter + ' pushet');
   else logErr('pulse-status push', putData);
-  try { await checkFlushWatch(cache); } catch (e) { logErr('flush-watch check', e); }
 }
 
 async function runOnce(cache, force = false) {
@@ -2457,31 +2428,6 @@ async function pollTelegramCommands(cache) {
           logErr('/REGNR', err);
           await sendTelegram(String.fromCharCode(10060) + ' /REGNR feil: ' + err.message);
         }
-      }
-      if (text.startsWith('/flushwatch')) {
-        const arg = text.replace('/flushwatch', '').trim().toLowerCase();
-        try {
-          if (arg === 'on' || arg === 'start') {
-            const biler = await getListe3();
-            const ids = (biler || []).map(b => b.id);
-            const w = { active: true, notified: false, startedAt: new Date().toISOString(), snapshotIds: ids };
-            saveFlushWatch(w);
-            await sendTelegram('\u2705 <b>Vilkar-flush-vakt startet</b>\n\nOvervaaker ' + ids.length + ' biler (gamle vilkar) som naa er i pipe/produksjon.\nDu faar varsel naar ALLE er ferdigbehandlet.\n\nBruk /flushwatch for status, /flushwatch off for aa stoppe.', false);
-          } else if (arg === 'off' || arg === 'stop') {
-            const w = loadFlushWatch(); w.active = false; saveFlushWatch(w);
-            await sendTelegram('\ud83d\uded1 Vilkar-flush-vakt stoppet.', false);
-          } else {
-            const w = loadFlushWatch();
-            if (!w.active && !(w.snapshotIds && w.snapshotIds.length)) {
-              await sendTelegram('\u2139\ufe0f Ingen vilkar-flush-vakt aktiv.\nStart med /flushwatch on (tar snapshot av biler under gamle vilkar).', false);
-            } else {
-              const prog = flushWatchProgress(w, cache);
-              const remList = prog.remainingIds.slice(0, 20).join(', ') + (prog.remainingIds.length > 20 ? ' ...' : '');
-              await sendTelegram('\ud83d\udcca <b>Vilkar-flush status</b>\n\nSnapshot: ' + prog.total + ' biler\nFerdig: ' + (prog.total - prog.remaining) + '\nGjenstaar: ' + prog.remaining + (w.active ? '' : ' (vakt AV)') + (prog.remaining ? '\n\nGjenstaaende intern-nr: ' + remList : '\n\n\u2705 Alle ferdige!'), false);
-            }
-          }
-        } catch (e) { await sendTelegram('\u274c /flushwatch feil: ' + e.message, false); }
-        continue;
       }
       if (text.startsWith('/finn ')) {
           log('/finn mottatt: ' + text);
