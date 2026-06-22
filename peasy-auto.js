@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.66';
+const VERSION = 'v20.67';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -134,6 +134,18 @@ function saveJSON(file, data) {
 
 // ── Cache ─────────────────────────────────────────────────────
 function isInCache(cache, erpId) { return !!cache[String(erpId)]; }
+function writeFinnLink(erpId, finnSelf) {
+  try {
+    if (!erpId) return;
+    var fs = require('fs');
+    var FP = '/Users/bot/peasy-auto/finn-links.json';
+    var m = {};
+    try { m = JSON.parse(fs.readFileSync(FP, 'utf8')) || {}; } catch (e) { m = {}; }
+    var link = (finnSelf && finnSelf.link) ? String(finnSelf.link) : null;
+    if (link) { m[String(erpId)] = link; } else { delete m[String(erpId)]; }
+    fs.writeFileSync(FP, JSON.stringify(m));
+  } catch (e) { try { logErr('writeFinnLink ' + erpId, e); } catch (e2) {} }
+}
 function addToCache(cache, erpId) {
   if (erpId) { cache[String(erpId)] = new Date().toISOString(); }
   saveJSON(CACHE_FILE, cache);
@@ -1654,6 +1666,7 @@ async function evalCar(bil, page, cache, opts = {}) {
   const erpId = bil.id;
   // v20.53: ALLTID soek regnr paa FINN (vet om bilen er aktiv paa Finn)
   let finnSelf = null; try { finnSelf = await checkFinnListing(regnr, bil, page); } catch (eFs) { logErr(`finnSelf ${regnr}`, eFs); }
+  writeFinnLink(erpId, finnSelf);
   // === v20.38 PRICING SAFETY VALVE ===
   function _computeBlockers(o) {
     const blockers = [];
@@ -2874,7 +2887,13 @@ async function main() {
       if (!res.ok) throw new Error('ERP ' + res.status + ' for ' + endpoint);
       const data = await res.json();
       const biler = (data && data.data && data.data.data && data.data.data.data) || (data && data.data && data.data.data) || (data && data.data) || [];
-      return Array.isArray(biler) ? biler : [];
+      var _arr = Array.isArray(biler) ? biler : [];
+      try {
+        var _fs = require('fs');
+        var _fl = JSON.parse(_fs.readFileSync('/Users/bot/peasy-auto/finn-links.json','utf8')) || {};
+        _arr.forEach(function(b){ if (b && b.id != null) { var _k = String(b.id); if (_fl[_k]) b.finn_link = _fl[_k]; } });
+      } catch (e) {}
+      return _arr;
     });
 
 
