@@ -90,6 +90,27 @@ function start(log) {
     return;
   }
 
+  // --- /finn-links endpoint (Pulse V2 BM Finn-kolonne) ---
+  if (req.method === 'GET' && req.url === '/finn-links') {
+    const auth = req.headers['authorization'] || '';
+    if (TOKEN && auth !== 'Bearer ' + TOKEN) {
+      res.writeHead(401, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+      res.end(JSON.stringify({ok:false,err:'unauthorized'}));
+      return;
+    }
+    try {
+      const fs = require('fs');
+      let fl = {};
+      try { fl = JSON.parse(fs.readFileSync('/Users/bot/peasy-auto/finn-links.json', 'utf8')) || {}; } catch (e) { fl = {}; }
+      res.writeHead(200, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+      res.end(JSON.stringify({ok:true,finn:fl}));
+    } catch (e) {
+      res.writeHead(500, {'Content-Type':'application/json','Access-Control-Allow-Origin':'*'});
+      res.end(JSON.stringify({ok:false,err:String(e.message||e)}));
+    }
+    return;
+  }
+
   // --- /signaler endpoint (Pulse V2 BM Signaler column) ---
   if (req.method === 'GET' && req.url === '/signaler') {
     const auth = req.headers['authorization'] || '';
