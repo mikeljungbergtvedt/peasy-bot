@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.65';
+const VERSION = 'v20.66';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1683,7 +1683,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         'Flagg:\n  \u2022 ' + blockers.join('\n  \u2022 ') + '\n\n' +
         'AI foreslo: ' + (o.dLav != null ? o.dLav : '?') + ' \u2013 ' + (o.dHoy != null ? o.dHoy : '?') + ' kr\n' +
         'Segment-confidence: ' + (o.segConfidence || '?') + '\n\n' +
-        '<a href="https://app.biladministrasjon.no/cars/' + erpId + '">\u00C5pne i ERP</a>',
+        '<a href="https://biladministrasjon.no/cars_driveno/processing/final_estimate/' + erpId + '">\u00C5pne i ERP</a>',
         { parse_mode: 'HTML' }
       );
     } catch (e) { logErr('blocker-alarm', regnr, e); }
@@ -1974,6 +1974,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         }
         const segF = (rF && rF.seg) || seg;
         const anchorF = getAnchor(poolF, segF);
+        if (finnSelf && Number(finnSelf.price) > 0) { var _adCap = Math.round(Number(finnSelf.price) * 0.95); if (anchorF.price > _adCap) { anchorF.price = _adCap; anchorF.reason = (anchorF.reason || '') + ' | cap: selgers Finn-annonse x0.95 = ' + _adCap.toLocaleString('nb-NO') + ' kr'; } } // finncap
         const valuationF = calcValuation(anchorF.price, segF.segment, poolF);
         const brregF = await checkBrreg(regnr, page);
         const tokenF = await getErpToken();
@@ -2019,6 +2020,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     }
 
     const anchor = { price: v2anker, reason: (v2.anchor && v2.anchor.begrunnelse_kort) || 'v2-anker' };
+    if (finnSelf && Number(finnSelf.price) > 0) { var _adCap = Math.round(Number(finnSelf.price) * 0.95); if (anchor.price > _adCap) { anchor.price = _adCap; anchor.reason = (anchor.reason || '') + ' | cap: selgers Finn-annonse x0.95 = ' + _adCap.toLocaleString('nb-NO') + ' kr'; } } // finncap
 
     // Comp-cap er AV for v2 (anker bygger paa realiserte salg, ikke asking-priser).
     // Sett PEASY_V2_COMPCAP=1 for aa reaktivere Easy sin comp-cap.
