@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.67';
+const VERSION = 'v20.68';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2919,7 +2919,7 @@ async function main() {
         const now = new Date();
     if (now.getMinutes() === 0 || now.getMinutes() === 30) {
       await runOnce(cache);
-      if (now.getHours() === 23) await sendKveldspuls();
+      if (now.getHours() === 23 && now.getMinutes() === 30) await sendKveldspuls(); // 23:30 only (cut 23:00)
     }
   }, 60000);
 
