@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.68';
+const VERSION = 'v20.69';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2291,7 +2291,14 @@ async function runOnce(cache, force = false) {
 
     try { await pushPulseStatus(biler, cache); } catch (eP) { logErr('pushPulseStatus start', eP); }
     for (const bil of biler) {
-      await evalCar(bil, page, cache, { aiCv: true });
+      // v20.69: frisk side per bil -> egen Cloudflare-clearance for elbilradar (unngaar 403)
+      const pgBil = await browser.newPage();
+      await pgBil.setExtraHTTPHeaders({ 'Accept-Language': 'nb-NO,nb;q=0.9' });
+      try {
+        await evalCar(bil, pgBil, cache, { aiCv: true });
+      } finally {
+        try { await pgBil.close(); } catch (e) {}
+      }
       await new Promise(r => setTimeout(r, 2000));
     }
   } catch (err) {
