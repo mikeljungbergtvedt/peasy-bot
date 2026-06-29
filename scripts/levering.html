@@ -48,10 +48,35 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   font-family: 'Inter', -apple-system, system-ui, sans-serif;
 }
 .nav-logo { display: flex; align-items: center; cursor: pointer; text-decoration: none; }
 .nav-logo img { height: 28px; width: auto; display: block; }
+.nav-actions { display: flex; align-items: center; gap: 18px; }
+.nav-back {
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+.nav-back:hover { opacity: 1; }
+.nav-cta {
+  background: var(--green);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 9999px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 0.15s, transform 0.15s;
+}
+.nav-cta:hover { background: #003319; transform: translateY(-1px); }
+@media (max-width: 520px) {
+  .nav-back { display: none; }
+}
 
 /* ── Hero ─────────────────────────────────────────────── */
 .hero {
@@ -261,6 +286,10 @@ body {
     <a href="https://peasy.no" class="nav-logo">
       <img src="https://peasy.no/Peasy_Logo_ORG.png" alt="Peasy Logo">
     </a>
+    <div class="nav-actions">
+      <a href="https://peasy.no" class="nav-back">← Tilbake til peasy.no</a>
+      <a href="https://peasy.no/#start" class="nav-cta">Få estimat →</a>
+    </div>
   </nav>
 </header>
 
