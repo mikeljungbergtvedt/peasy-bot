@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.71';
+const VERSION = 'v20.72';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2814,14 +2814,16 @@ const LISTE_DEFS = [
   { nr: 12, navn: 'VENTER PÅ SIGNERING',  emoji: '✍️', endpoint: 'wait_for_signing',         vis_bud: false },
 ];
 
-async function checkListeWatch() {
+async function checkListeWatch(force = false) {
   const now = new Date();
   const oslo = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Oslo' }));
   const h = oslo.getHours();
   const key = oslo.toISOString().slice(0,10) + 'h' + h;
-  // Daglig stuck-oversikt kl 12 og 15 (en gang per klokketime)
-  if ((h !== 12 && h !== 15) || _listeWatchSistSjekket === key) return;
-  _listeWatchSistSjekket = key;
+  // Daglig stuck-oversikt kl 12 og 15 (en gang per klokketime), force=true bypass for manuell /stuck
+  if (!force) {
+    if ((h !== 12 && h !== 15) || _listeWatchSistSjekket === key) return;
+    _listeWatchSistSjekket = key;
+  }
 
   const hhmm = String(oslo.getHours()).padStart(2,'0') + ':' + String(oslo.getMinutes()).padStart(2,'0');
   try {
@@ -2896,7 +2898,7 @@ async function checkListeWatch() {
 
 // checkStuckCars: kjorer liste-watch (8/9/10/11). Returnerer tomt resultat for /stuck-kommandoen.
 async function checkStuckCars() {
-  await checkListeWatch();
+  await checkListeWatch(true); // force=true for manuell /stuck
   return { newStuck: 0, reminders: 0, cleared: 0 };
 }
 // Bakoverkompatibilitet — main() kaller fortsatt checkAuksjonAvsluttet
