@@ -4,20 +4,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Levering og henting — Peasy</title>
+<meta name="description" content="Slik leverer du bilen din til Peasy — adresser, åpningstider og instruksjoner for levering utenfor åpningstid.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root {
   --green: #004225;
-  --green-dark: #003319;
   --green-soft: #e8efea;
   --yellow: #FFCC33;
-  --blue: #82bfd2;
   --ink: #0f1d18;
   --gray: #6b7575;
   --bg-soft: #f5f5f2;
-  --border: rgba(15,29,24,0.08);
+  --border-soft: rgba(0,66,37,0.06);
+  --border: rgba(0,66,37,0.08);
   --shadow: 0 6px 24px rgba(15,29,24,0.06);
 }
 * { box-sizing: border-box; }
@@ -28,302 +28,296 @@ body {
   background: #fff;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Header */
-.site-header {
-  background: var(--green);
-  color: #fff;
+/* ── Header (identisk med account.peasy.no) ──────────── */
+.nav-wrapper {
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: saturate(180%) blur(8px);
+  -webkit-backdrop-filter: saturate(180%) blur(8px);
+  border-bottom: 1px solid var(--border-soft);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.nav-container {
+  max-width: 1280px;
+  margin: 0 auto;
   padding: 18px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  font-family: 'Outfit', 'Inter', sans-serif;
 }
-.site-header a.brand {
-  color: #fff;
-  font-weight: 800;
-  font-size: 22px;
-  text-decoration: none;
-  letter-spacing: -0.02em;
-}
-.site-header a.brand span { color: var(--yellow); }
-.site-header nav a {
-  color: #fff;
-  text-decoration: none;
-  margin-left: 20px;
-  font-weight: 500;
-  font-size: 14px;
-  opacity: 0.85;
-}
-.site-header nav a:hover { opacity: 1; }
+.nav-logo { display: flex; align-items: center; cursor: pointer; text-decoration: none; }
+.nav-logo img { height: 30px; width: auto; display: block; }
 
-/* Hero */
+/* ── Hero ─────────────────────────────────────────────── */
 .hero {
   background: linear-gradient(135deg, var(--green) 0%, #0a5a36 100%);
   color: #fff;
-  padding: 60px 24px 80px;
+  padding: 64px 24px 88px;
   text-align: center;
 }
 .hero h1 {
-  font-size: clamp(28px, 5vw, 44px);
+  font-family: 'Outfit', 'Inter', sans-serif;
+  font-size: clamp(30px, 5vw, 46px);
   font-weight: 800;
-  margin: 0 0 12px;
+  margin: 0 0 14px;
   letter-spacing: -0.03em;
-  line-height: 1.15;
+  line-height: 1.1;
 }
 .hero p {
   font-size: clamp(15px, 2vw, 18px);
   max-width: 640px;
   margin: 0 auto;
   opacity: 0.92;
+  line-height: 1.55;
 }
 
-/* Container */
+/* ── Container ────────────────────────────────────────── */
 .container {
-  max-width: 960px;
-  margin: -40px auto 0;
-  padding: 0 24px 80px;
+  max-width: 920px;
+  margin: -48px auto 0;
+  padding: 0 24px 96px;
   position: relative;
   z-index: 2;
 }
 
-/* Location nav (pills) */
-.loc-nav {
+/* ── Key labeling notice ─────────────────────────────── */
+.key-notice {
+  background: #FFF8E1;
+  border: 1px solid var(--yellow);
+  border-left: 4px solid var(--yellow);
+  border-radius: 14px;
+  padding: 20px 24px;
+  margin-bottom: 28px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: center;
-  background: #fff;
-  padding: 22px;
-  border-radius: 18px;
-  box-shadow: var(--shadow);
-  margin-bottom: 36px;
+  gap: 16px;
+  align-items: flex-start;
+}
+.key-notice .icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+.key-notice .text { font-size: 15px; line-height: 1.55; }
+.key-notice .text strong { color: var(--green); display: block; margin-bottom: 4px; font-weight: 700; }
+
+/* ── Location nav chips ──────────────────────────────── */
+.loc-nav {
+  display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  background: #fff; padding: 22px; border-radius: 18px;
+  box-shadow: var(--shadow); margin-bottom: 36px; border: 1px solid var(--border);
 }
 .loc-nav a {
-  display: inline-block;
-  padding: 10px 22px;
-  background: var(--green-soft);
-  color: var(--green);
-  border-radius: 9999px;
-  text-decoration: none;
-  font-weight: 600;
-  font-size: 14px;
+  padding: 10px 22px; background: var(--green-soft); color: var(--green);
+  border-radius: 9999px; text-decoration: none; font-weight: 600; font-size: 14px;
   transition: all 0.15s ease;
 }
-.loc-nav a:hover {
-  background: var(--green);
-  color: #fff;
-}
+.loc-nav a:hover { background: var(--green); color: #fff; }
 
-/* Location card */
+/* ── Location card ───────────────────────────────────── */
 .location {
-  background: #fff;
-  border-radius: 22px;
-  padding: 36px 32px;
-  box-shadow: var(--shadow);
-  margin-bottom: 28px;
-  border: 1px solid var(--border);
-  scroll-margin-top: 24px;
+  background: #fff; border-radius: 22px; padding: 38px 34px;
+  box-shadow: var(--shadow); margin-bottom: 28px;
+  border: 1px solid var(--border); scroll-margin-top: 96px;
 }
 .location h2 {
-  font-size: 28px;
-  font-weight: 800;
-  color: var(--green);
-  margin: 0 0 4px;
-  letter-spacing: -0.02em;
+  font-family: 'Outfit', 'Inter', sans-serif;
+  font-size: 28px; font-weight: 800; color: var(--green);
+  margin: 0 0 4px; letter-spacing: -0.02em;
 }
 .location .subtitle {
-  font-size: 13px;
-  color: var(--gray);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 13px; color: var(--gray); font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 22px;
+}
+.address-block {
+  background: var(--bg-soft);
+  border-radius: 12px;
+  padding: 16px 20px;
   margin-bottom: 24px;
+  font-size: 15px;
+  line-height: 1.6;
 }
+.address-block .addr-row { display: flex; gap: 12px; padding: 4px 0; }
+.address-block .addr-row .label {
+  color: var(--gray); font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  min-width: 100px; padding-top: 2px;
+}
+.address-block .addr-row .val { color: var(--ink); flex: 1; }
+.address-block .addr-row .val strong { color: var(--green); }
 
-.section {
-  margin-top: 24px;
-}
-.section:first-of-type { margin-top: 0; }
+.section { margin-top: 24px; }
 .section h3 {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--green);
-  margin: 0 0 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  font-size: 14px; font-weight: 700; color: var(--green);
+  margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.08em;
+  display: flex; align-items: center; gap: 10px;
 }
 .section h3::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: var(--yellow);
-  border-radius: 50%;
+  content: ''; display: inline-block; width: 6px; height: 6px;
+  background: var(--yellow); border-radius: 50%;
 }
-.section ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
+.section ul { list-style: none; padding: 0; margin: 0; }
 .section li {
-  position: relative;
-  padding-left: 24px;
-  margin-bottom: 10px;
-  font-size: 15px;
-  color: var(--ink);
+  position: relative; padding-left: 24px; margin-bottom: 10px;
+  font-size: 15px; color: var(--ink);
 }
-.section li::before {
-  content: '→';
-  position: absolute;
-  left: 0;
-  top: 0;
-  color: var(--green);
-  font-weight: 700;
+.section li::before { content: '→'; position: absolute; left: 0; top: 0; color: var(--green); font-weight: 700; }
+.unavailable {
+  background: #FFF8E1; border-left: 3px solid var(--yellow);
+  padding: 14px 18px; border-radius: 8px;
+  font-size: 15px; color: var(--ink);
 }
+.unavailable strong { display: block; margin-bottom: 4px; color: var(--green); }
 
-.hours-box {
-  background: var(--bg-soft);
-  border-left: 3px solid var(--green);
-  padding: 12px 16px;
-  border-radius: 8px;
-  font-size: 14px;
-  margin-bottom: 8px;
-}
-.hours-box strong { color: var(--green); }
-
-/* Audience tag */
-.audience-tag {
-  display: inline-block;
-  background: var(--yellow);
-  color: var(--ink);
-  font-size: 11px;
-  font-weight: 700;
-  padding: 3px 10px;
-  border-radius: 6px;
-  margin-left: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  vertical-align: middle;
-}
-
-/* Footer */
+/* ── Footer (identisk med account.peasy.no) ──────────── */
 .site-footer {
-  background: var(--green-dark);
-  color: rgba(255,255,255,0.85);
-  text-align: center;
-  padding: 32px 24px;
-  font-size: 14px;
+  background: #fff;
+  color: var(--gray);
+  padding: 64px 24px 32px;
+  border-top: 1px solid var(--border);
+  font-family: 'Inter', sans-serif;
 }
-.site-footer a { color: var(--yellow); text-decoration: none; font-weight: 600; }
-.site-footer a:hover { text-decoration: underline; }
+.footer-wrapper {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 32px 48px;
+  margin-bottom: 48px;
+}
+.footer-column h4 {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  margin: 0 0 14px;
+}
+.footer-column p, .footer-column a, .footer-column li {
+  color: var(--gray);
+  text-decoration: none;
+  font-size: 14px;
+  line-height: 1.7;
+  font-weight: 400;
+}
+.footer-column a { color: var(--ink); }
+.footer-column a:hover { color: var(--green); }
+.footer-column ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.footer-logo img { height: 30px; margin-bottom: 14px; display: block; }
+.footer-logo p { max-width: 320px; font-size: 14px; line-height: 1.55; color: var(--gray); }
+.footer-col-address { line-height: 1.6; font-size: 14px; color: var(--gray); }
+.footer-col-address a.green { color: var(--green); font-weight: 600; text-decoration: none; }
+.footer-bottom {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-top: 24px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 13px;
+  color: var(--gray);
+  text-align: center;
+}
 
-@media (max-width: 600px) {
-  .site-header nav a:not(:last-child) { display: none; }
-  .container { padding: 0 16px 60px; }
+@media (max-width: 800px) {
+  .footer-wrapper { grid-template-columns: 1fr 1fr; gap: 32px; }
+  .address-block .addr-row { flex-direction: column; gap: 2px; }
+  .address-block .addr-row .label { min-width: 0; }
+}
+@media (max-width: 520px) {
+  .footer-wrapper { grid-template-columns: 1fr; gap: 28px; }
+  .container { padding: 0 16px 64px; }
   .location { padding: 28px 22px; }
   .loc-nav { padding: 16px; }
   .loc-nav a { padding: 8px 16px; font-size: 13px; }
+  .key-notice { flex-direction: column; gap: 10px; }
 }
 </style>
 </head>
 <body>
 
-<header class="site-header">
-  <a href="https://peasy.no" class="brand">Peasy<span>.</span></a>
-  <nav>
-    <a href="https://peasy.no/#how">Slik virker det</a>
-    <a href="https://peasy.no/#faq">FAQ</a>
-    <a href="https://peasy.no/#start">Få estimat →</a>
+<header class="nav-wrapper">
+  <nav class="nav-container">
+    <a href="https://peasy.no" class="nav-logo">
+      <img src="https://peasy.no/Peasy_Logo_ORG.png" alt="Peasy Logo">
+    </a>
   </nav>
 </header>
 
 <section class="hero">
   <h1>Levering og henting</h1>
-  <p>Instruksjoner for alle Peasy sine lokasjoner. Velg lokasjonen din under for innkjøring, åpningstider og nøkkelhåndtering utenfor arbeidstid.</p>
+  <p>Adresser, åpningstider og instruksjoner for levering utenfor åpningstid.</p>
 </section>
 
 <div class="container">
 
+  <div class="key-notice">
+    <div class="icon">🔑</div>
+    <div class="text">
+      <strong>Husk: Merk nøkkelen din</strong>
+      På anleggene møter du våre samarbeidspartnere — du ser ikke «Peasy»-skilt utenpå bygget. Merk alltid nøkkelen din med <strong style="display:inline;color:var(--green)">«Peasy» + bilens registreringsnummer</strong> (f.eks. <em>«Peasy AB12345»</em>), uansett hvilket anlegg du leverer til.
+    </div>
+  </div>
+
   <nav class="loc-nav">
-    <a href="#skedsmo">Skedsmo</a>
-    <a href="#bergen">Bergen</a>
-    <a href="#ski">Ski</a>
+    <a href="#oslo-skedsmokorset">Oslo (Skedsmokorset)</a>
+    <a href="#bergen-blomsterdalen">Bergen</a>
+    <a href="#oslo-ski">Oslo (Ski)</a>
     <a href="#trondheim">Trondheim</a>
-    <a href="#rogaland">Rogaland</a>
+    <a href="#stavanger-sandnes">Stavanger</a>
   </nav>
 
-  <article class="location" id="skedsmo">
-    <h2>Skedsmo</h2>
-    <div class="subtitle">Levering og henting</div>
+  <article class="location" id="oslo-skedsmokorset">
+    <h2>Oslo (Skedsmokorset)</h2>
+    <div class="subtitle">Hovedanlegg Østlandet</div>
 
-    <div class="section">
-      <h3>Åpningstid</h3>
-      <div class="hours-box"><strong>Mandag–fredag:</strong> 08:00 – 16:00</div>
+    <div class="address-block">
+      <div class="addr-row"><div class="label">Adresse</div><div class="val">Bølerveien 77, 2020 Skedsmokorset</div></div>
+      <div class="addr-row"><div class="label">Partner</div><div class="val">Autoringen</div></div>
+      <div class="addr-row"><div class="label">Åpningstid</div><div class="val"><strong>Mandag–fredag 08:00–16:00</strong></div></div>
     </div>
 
     <div class="section">
-      <h3>I åpningstid — alle<span class="audience-tag">Alle</span></h3>
-      <ul>
-        <li>Kjør inn porten og hold til venstre.</li>
-        <li>Sett bilen under tak.</li>
-        <li>Gå inn på kontoret med nøklene.</li>
-        <li>Privatpersoner må hente og levere biler i lokasjonens åpningstid.</li>
-      </ul>
-    </div>
-
-    <div class="section">
-      <h3>Utenfor åpningstid<span class="audience-tag">Forhandlere &amp; transportører</span></h3>
-      <ul>
-        <li>Ring opp porten.</li>
-        <li>Kjør inn porten og hold til venstre. Parker bilen under tak.</li>
-        <li>Legg nøkkelen i nøkkeldropp montert på kortveggen på bygget under tak.</li>
-        <li>Forhandlere og transportører med avtale kan forhåndsavtale henting utenfor åpningstid. Bilene vil da stå på nordenden av bygget. Nøkler vil ligge i safe på kortenden av bygget.</li>
-      </ul>
+      <h3>Levering utenfor åpningstid</h3>
+      <div class="unavailable">
+        <strong>Ikke tilgjengelig på Skedsmokorset</strong>
+        Levering må skje i åpningstid mandag–fredag mellom 08:00 og 16:00.
+      </div>
     </div>
   </article>
 
-  <article class="location" id="bergen">
-    <h2>Bergen</h2>
-    <div class="subtitle">Levering og henting</div>
+  <article class="location" id="bergen-blomsterdalen">
+    <h2>Bergen (Blomsterdalen)</h2>
+    <div class="subtitle">Vestlandet</div>
 
-    <div class="section">
-      <h3>Dagtid — henting og levering</h3>
-      <ul>
-        <li>Parker på parkeringsplassen utenfor hovedinngangen.</li>
-        <li>Ta kontakt i skranken.</li>
-      </ul>
+    <div class="address-block">
+      <div class="addr-row"><div class="label">Adresse</div><div class="val">Fleslandsvegen 70A, 5258 Blomsterdalen</div></div>
+      <div class="addr-row"><div class="label">Partner</div><div class="val">Autoringen</div></div>
+      <div class="addr-row"><div class="label">Åpningstid</div><div class="val"><strong>Mandag–fredag 08:00–16:00</strong></div></div>
     </div>
 
     <div class="section">
-      <h3>Utenfor åpningstid<span class="audience-tag">Privat, Gire &amp; transport</span></h3>
+      <h3>Levering utenfor åpningstid</h3>
       <ul>
         <li>Kjør bak bygget ved levering på kvelden.</li>
         <li>Kjør opp bakken mot 2. etasje på bygget.</li>
-        <li>Rett frem finner dere to ledige parkeringsplasser.</li>
+        <li>Rett frem finner du to ledige parkeringsplasser.</li>
         <li>Til venstre for porten er det dropsafe til nøkler.</li>
         <li>Pass på at kjøreveier ikke blokkeres.</li>
       </ul>
     </div>
   </article>
 
-  <article class="location" id="ski">
-    <h2>Ski</h2>
-    <div class="subtitle">Levering og henting</div>
+  <article class="location" id="oslo-ski">
+    <h2>Oslo (Ski)</h2>
+    <div class="subtitle">Follo</div>
 
-    <div class="section">
-      <h3>Dagtid — henting og levering</h3>
-      <ul>
-        <li>Parker utenfor skranken ved inngangsdøren.</li>
-        <li>Ta kontakt i skranken.</li>
-      </ul>
+    <div class="address-block">
+      <div class="addr-row"><div class="label">Adresse</div><div class="val">Dynamittveien 14B, 1400 Ski</div></div>
+      <div class="addr-row"><div class="label">Partner</div><div class="val">Autoringen</div></div>
+      <div class="addr-row"><div class="label">Åpningstid</div><div class="val"><strong>Mandag–fredag 08:00–16:00</strong></div></div>
     </div>
 
     <div class="section">
-      <h3>Utenfor åpningstid — levering</h3>
+      <h3>Levering utenfor åpningstid</h3>
       <ul>
         <li>Parker bilen på oppmerket område.</li>
         <li>Legg nøkler i nøkkelsafe på veggen merket Autoringen.</li>
@@ -333,18 +327,16 @@ body {
 
   <article class="location" id="trondheim">
     <h2>Trondheim</h2>
-    <div class="subtitle">Levering og henting</div>
+    <div class="subtitle">Trøndelag</div>
 
-    <div class="section">
-      <h3>Dagtid — henting og levering</h3>
-      <ul>
-        <li>Parker utenfor skranken ved inngangsdøren.</li>
-        <li>Ta kontakt i skranken.</li>
-      </ul>
+    <div class="address-block">
+      <div class="addr-row"><div class="label">Adresse</div><div class="val">Haakon VIIs gate 23C, 7041 Trondheim</div></div>
+      <div class="addr-row"><div class="label">Partner</div><div class="val">Bilia Outlet Trondheim</div></div>
+      <div class="addr-row"><div class="label">Åpningstid</div><div class="val"><strong>Mandag–fredag 08:00–16:00</strong></div></div>
     </div>
 
     <div class="section">
-      <h3>Utenfor åpningstid — levering</h3>
+      <h3>Levering utenfor åpningstid</h3>
       <ul>
         <li>Parker bilen langs gjerdet ved det avmerkede området.</li>
         <li>Legg nøkkelen i nøkkelsafe/nøkkeldroppet merket med Bilia Outlet Trondheim.</li>
@@ -352,28 +344,21 @@ body {
     </div>
   </article>
 
-  <article class="location" id="rogaland">
-    <h2>Rogaland</h2>
-    <div class="subtitle">Levering og henting</div>
+  <article class="location" id="stavanger-sandnes">
+    <h2>Stavanger (Sandnes)</h2>
+    <div class="subtitle">Rogaland</div>
 
-    <div class="section">
-      <h3>Åpningstid</h3>
-      <div class="hours-box"><strong>Mandag–fredag:</strong> 08:00 – 15:30</div>
+    <div class="address-block">
+      <div class="addr-row"><div class="label">Adresse</div><div class="val">Vestre Svanholmen 9, 4313 Sandnes</div></div>
+      <div class="addr-row"><div class="label">Partner</div><div class="val">Bilfiks / Toyota Sør-Vest</div></div>
+      <div class="addr-row"><div class="label">Åpningstid</div><div class="val"><strong>Mandag–fredag 08:00–15:30</strong></div></div>
     </div>
 
     <div class="section">
-      <h3>Dagtid — henting og levering</h3>
+      <h3>Levering utenfor åpningstid</h3>
       <ul>
-        <li>Parker bilen på den markerte grusplassen.</li>
-        <li>Lever nøkkel hos Bilfiks/Toyota Sørvest.</li>
-      </ul>
-    </div>
-
-    <div class="section">
-      <h3>Utenfor åpningstid — levering</h3>
-      <ul>
-        <li>Bilene plasseres på grusplassen.</li>
-        <li>Nøkler merkes Autoringen og legges i nøkkeldroppet hos Bilfiks-Toyota Sørvest.</li>
+        <li>Bilene plasseres på den markerte grusplassen.</li>
+        <li>Nøkler merkes Autoringen og legges i nøkkeldroppet hos Bilfiks/Toyota Sør-Vest.</li>
       </ul>
     </div>
   </article>
@@ -381,7 +366,42 @@ body {
 </div>
 
 <footer class="site-footer">
-  Spørsmål? Se <a href="https://peasy.no/#faq">FAQ</a> eller kontakt oss på <a href="mailto:post@peasy.no">post@peasy.no</a>.
+  <div class="footer-wrapper">
+    <div class="footer-column footer-logo">
+      <img src="https://peasy.no/Peasy_Logo_ORG.png" alt="Peasy">
+      <p>Den enkleste måten å selge bil på i Norge.</p>
+    </div>
+    <div class="footer-column">
+      <h4>Peasy</h4>
+      <ul>
+        <li><a href="https://peasy.no/#om">Om oss</a></li>
+        <li><a href="https://peasy.no/#vilkar">Vilkår</a></li>
+        <li><a href="https://peasy.no/personvern">Personvern</a></li>
+      </ul>
+    </div>
+    <div class="footer-column">
+      <h4>Hjelp</h4>
+      <ul>
+        <li><a href="https://peasy.no/#faq">Vanlige spørsmål</a></li>
+        <li><a href="https://peasy.no/#kontakt">Kontakt</a></li>
+        <li><a href="https://account.peasy.no/">Min side</a></li>
+      </ul>
+    </div>
+    <div class="footer-column">
+      <h4>Kontakt</h4>
+      <div class="footer-col-address">
+        Autoringen AS<br>
+        Strandveien 15–17<br>
+        1366 Lysaker<br>
+        Org.nr. 987 327 359<br>
+        <a class="green" href="tel:+4724201900">+47 24 20 19 00</a><br>
+        <a class="green" href="https://peasy.no">peasy.no</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    © 2026 Peasy / Autoringen AS
+  </div>
 </footer>
 
 </body>
