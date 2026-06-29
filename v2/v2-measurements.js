@@ -55,7 +55,10 @@ export async function recordMeasurement(run, easyEval) {
       comps_count: num(easyEval.comps_count),
       bracket: easyEval.bracket || null,
       anchor_reason: easyEval.anchor_reason || null,
+      km_override: easyEval.km_override || null,
     } : null,
+
+    km_override: (easyEval && easyEval.km_override) || null,
 
     v2: {
       anker: v2Anker,
