@@ -14,6 +14,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <a href="#om">Om oss</a>
 <a href="#how">Slik virker det</a>
 <a href="#proof">Anmeldelser</a>
+<a href="/levering.html">Levering</a>
 <a href="#faq">FAQ</a>
 <a :href="accountUrl" target="_blank" rel="noopener">Min Side</a>
 <form class="nav-cta-form" id="nav-form" :action="carAddUrl" method="GET"><input type="hidden" name="step" value="search" /><div class="nav-plate"><img src="/number-plate-flag-no-2.svg" alt="NO" class="nav-plate-flag" width="20" height="32" fetchpriority="high" /><input type="text" name="reg_number" class="nav-reg-input" placeholder="BU 39939" maxlength="8" autocomplete="off" autocapitalize="characters" inputmode="text" required /></div><button type="submit" class="nav-cta-btn">Få estimat →</button></form>
@@ -377,7 +378,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <p style="font-size:14px;color:var(--gray);line-height:1.6;max-width:320px">Den enkleste måten å selge bil på i Norge.</p>
 </div>
 <div class="footer-col" style="display:flex;flex-direction:column"><ul style="list-style:none;padding:0;margin:0"><li><a href="#om">Om oss</a></li><li><a href="#vilkar" onclick="event.preventDefault();document.getElementById('vilkar-modal').style.display='flex'">Vilkår</a></li><li><a href="#personvern" onclick="event.preventDefault();document.getElementById('personvern-modal').style.display='flex'">Personvern</a></li></ul></div>
-<div class="footer-col" style="display:flex;flex-direction:column"><ul style="list-style:none;padding:0;margin:0"><li><a href="#faq">FAQ</a></li><li><a href="#kontakt">Kontakt</a></li><li><a :href="accountUrl" target="_blank" rel="noopener">Min Side</a></li></ul></div>
+<div class="footer-col" style="display:flex;flex-direction:column"><ul style="list-style:none;padding:0;margin:0"><li><a href="#faq">FAQ</a></li><li><a href="/levering.html">Levering &amp; henting</a></li><li><a href="#kontakt">Kontakt</a></li><li><a :href="accountUrl" target="_blank" rel="noopener">Min Side</a></li></ul></div>
 <div class="footer-col" style="display:flex;flex-direction:column"><ul style="list-style:none;padding:0;margin:0"><li style="font-size:14px;color:var(--gray);line-height:1.6">Autoringen AS<br />Strandveien 15-17<br />1366 Lysaker<br />Org.nr. 987 327 359<br /><a href="tel:+4724201900" style="color:var(--green);font-weight:600">+47 24 20 19 00</a><br /><a :href="siteUrl" style="color:var(--green);font-weight:600">peasy.no</a></li></ul></div>
 
 
@@ -460,6 +461,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   <a href="#om" data-mm-close>Om oss</a>
   <a href="#how" data-mm-close>Slik virker det</a>
   <a href="#proof" data-mm-close>Anmeldelser</a>
+  <a href="/levering.html" data-mm-close>Levering</a>
   <a href="#faq" data-mm-close>FAQ</a>
   <a :href="accountUrl" target="_blank" rel="noopener" data-mm-close>Min Side</a>
 
