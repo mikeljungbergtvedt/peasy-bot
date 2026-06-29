@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.70';
+const VERSION = 'v20.71';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2853,6 +2853,37 @@ async function checkListeWatch() {
         logErr(`checkListeWatch liste ${def.nr}`, eList);
       }
     }
+    // v20.71: 5a "På vei" — kun biler med ETA tilbake i tid (forsinket)
+    try {
+      const res5a = await fetch(`${CONFIG.erp.base}/c2b_module/peasy/processing/on_the_way?per_page=100`, { headers: authH(token) });
+      if (res5a.ok) {
+        const data5a = await res5a.json();
+        const biler5a = data5a.data?.data?.data || [];
+        const today = new Date(); today.setHours(0,0,0,0);
+        const forsinket = biler5a.filter(b => {
+          if (!b.estimated_time_arrival) return false;
+          const eta = new Date(b.estimated_time_arrival);
+          if (isNaN(eta)) return false;
+          eta.setHours(0,0,0,0);
+          return eta < today;
+        });
+        log(`Liste 5a (på vei): ${biler5a.length} biler, ${forsinket.length} forsinket`);
+        if (forsinket.length) {
+          const linjer = forsinket.map(bil => {
+            const regnr = bil.registration_number || '?';
+            const merke  = bil.drive_no_car_data?.make || bil.make || '';
+            const modell = bil.drive_no_car_data?.model_series || bil.model_series || '';
+            const etaStr = String(bil.estimated_time_arrival).slice(0,10);
+            const eta = new Date(bil.estimated_time_arrival); eta.setHours(0,0,0,0);
+            const diff = Math.round((today.getTime() - eta.getTime()) / 86400000);
+            return '  ' + regnr + ' | ' + (merke + ' ' + modell).trim() + ' | ETA ' + etaStr + ' (' + diff + ' dager forsinket)';
+          });
+          totalt += forsinket.length;
+          seksjoner.push('🚚 <b>5A PÅ VEI – FORSINKET</b> (' + forsinket.length + ')\n' + linjer.join('\n'));
+        }
+      }
+    } catch (e5a) { logErr('checkListeWatch 5a', e5a); }
+
     if (seksjoner.length) {
       await sendTelegram('📋 <b>STUCK-OVERSIKT ' + hhmm + '</b> — ' + totalt + ' biler står på vent\n\n' + seksjoner.join('\n\n'));
       log('Stuck-oversikt sendt: ' + totalt + ' biler');
