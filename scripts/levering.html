@@ -168,15 +168,28 @@ body {
   font-size: 15px; color: var(--ink);
 }
 .unavailable strong { display: block; margin-bottom: 4px; color: var(--green); }
-.location-map { margin-top: 22px; }
+.location-map { margin-top: 22px; text-align: center; }
 .location-map img {
   width: 100%; height: auto; display: block;
+  max-width: 520px; max-height: 360px;
+  object-fit: cover;
+  margin-left: auto; margin-right: auto;
   border-radius: 12px; border: 1px solid var(--border);
 }
 .location-map figcaption {
   font-size: 12px; color: var(--gray); text-align: center;
   margin-top: 8px; font-style: italic;
 }
+.map-download-link {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--green);
+  text-decoration: none;
+  font-weight: 500;
+}
+.map-download-link:hover { text-decoration: underline; }
+.map-download-link .arrow { display: inline-block; margin-right: 4px; }
 
 /* ── Footer (identisk med account.peasy.no) ──────────── */
 .site-footer {
@@ -315,6 +328,9 @@ body {
       <figure class="location-map">
         <img src="/img/levering/bergen.jpg" alt="Kart over innkjøring til Bergen-anlegget">
         <figcaption>Innkjøring — Bergen (Blomsterdalen)</figcaption>
+        <a class="map-download-link" href="/img/levering/bergen.jpg" target="_blank" rel="noopener" download>
+          <span class="arrow" aria-hidden="true">↓</span>Last ned kart i full størrelse
+        </a>
       </figure>
     </div>
   </article>
@@ -338,6 +354,9 @@ body {
       <figure class="location-map">
         <img src="/img/levering/ski.jpg" alt="Kart over parkeringsområde på Ski-anlegget">
         <figcaption>Parkering — Oslo (Ski)</figcaption>
+        <a class="map-download-link" href="/img/levering/ski.jpg" target="_blank" rel="noopener" download>
+          <span class="arrow" aria-hidden="true">↓</span>Last ned kart i full størrelse
+        </a>
       </figure>
     </div>
   </article>
@@ -361,6 +380,9 @@ body {
       <figure class="location-map">
         <img src="/img/levering/trondheim.jpg" alt="Kart over avmerket område på Trondheim-anlegget">
         <figcaption>Parkering — Trondheim</figcaption>
+        <a class="map-download-link" href="/img/levering/trondheim.jpg" target="_blank" rel="noopener" download>
+          <span class="arrow" aria-hidden="true">↓</span>Last ned kart i full størrelse
+        </a>
       </figure>
     </div>
   </article>
@@ -384,6 +406,9 @@ body {
       <figure class="location-map">
         <img src="/img/levering/stavanger.jpg" alt="Kart over grusplassen på Stavanger-anlegget">
         <figcaption>Parkering — Stavanger (Sandnes)</figcaption>
+        <a class="map-download-link" href="/img/levering/stavanger.jpg" target="_blank" rel="noopener" download>
+          <span class="arrow" aria-hidden="true">↓</span>Last ned kart i full størrelse
+        </a>
       </figure>
     </div>
   </article>
