@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.75';
+const VERSION = 'v20.76';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2819,7 +2819,19 @@ let _liste8Varslet  = new Set();
 let _liste9Varslet  = new Set();
 let _liste10Varslet = new Set();
 let _liste11Varslet = new Set();
+// v20.76: persister liste-watch-key til disk så stuck-mail ikke sendes på nytt etter restart
+const LISTE_WATCH_STATE_FILE = path.join(__dirname, 'liste-watch-state.json');
 let _listeWatchSistSjekket = '';
+try {
+  if (fs.existsSync(LISTE_WATCH_STATE_FILE)) {
+    const _lws = JSON.parse(fs.readFileSync(LISTE_WATCH_STATE_FILE, 'utf8'));
+    _listeWatchSistSjekket = _lws.lastKey || '';
+  }
+} catch (e) { _listeWatchSistSjekket = ''; }
+function _saveListeWatchKey(k) {
+  try { fs.writeFileSync(LISTE_WATCH_STATE_FILE, JSON.stringify({ lastKey: k, savedAt: new Date().toISOString() })); }
+  catch (e) { logErr('save liste-watch-state', e); }
+}
 
 const LISTE_DEFS = [
   { nr: 8,  navn: 'AUKSJON AVSLUTTET',     emoji: '🏁', endpoint: 'auction_finished',          set: () => _liste8Varslet,  vis_bud: true  },
@@ -2838,6 +2850,7 @@ async function checkListeWatch(force = false) {
   if (!force) {
     if ((h !== 12 && h !== 15) || _listeWatchSistSjekket === key) return;
     _listeWatchSistSjekket = key;
+    _saveListeWatchKey(key);
   }
 
   const hhmm = String(oslo.getHours()).padStart(2,'0') + ':' + String(oslo.getMinutes()).padStart(2,'0');
