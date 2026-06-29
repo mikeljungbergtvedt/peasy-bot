@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.73';
+const VERSION = 'v20.74';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2486,7 +2486,7 @@ async function pollTelegramCommands(cache) {
             const t = getStuckThreshold();
             await sendTelegram(`📋 Stuck-watch threshold: ${t} arbeidsdager.\nKjorer sjekk na...`);
             log('/stuck status mottatt');
-            const result = await checkStuckCars();
+            const result = await checkStuckCars(true);
             if (result) {
               await sendTelegram(
                 `✅ Stuck-sjekk ferdig:\n` +
@@ -2899,8 +2899,8 @@ async function checkListeWatch(force = false) {
 }
 
 // checkStuckCars: kjorer liste-watch (8/9/10/11). Returnerer tomt resultat for /stuck-kommandoen.
-async function checkStuckCars() {
-  await checkListeWatch(true); // force=true for manuell /stuck
+async function checkStuckCars(force = false) {
+  await checkListeWatch(force);
   return { newStuck: 0, reminders: 0, cleared: 0 };
 }
 // Bakoverkompatibilitet — main() kaller fortsatt checkAuksjonAvsluttet
