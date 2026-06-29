@@ -6,6 +6,7 @@ import 'dotenv/config';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readFileSync, writeFileSync } from 'fs';
 
 import { collectAllData }     from './data-collector.js';
 import { chooseAnchor }       from './ai-anchor.js';
@@ -16,6 +17,10 @@ import { pushToPulse }       from './v2-push-to-pulse.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(__dirname, 'logs');
+
+const EVAL_CACHE_FILE = '/Users/bot/peasy-pricing-v2/v2-eval-cache.json';
+let evalCache = {};
+try { evalCache = JSON.parse(readFileSync(EVAL_CACHE_FILE, 'utf8')); } catch (e) { evalCache = {}; }
 
 function fmtKr(n) {
   if (!Number.isFinite(Number(n))) return '?';
@@ -72,6 +77,14 @@ export async function evalRegnr(regnr, km, opts = {}) {
     steps: {},
     errors: [],
   };
+
+  const cacheKey = String(opts.erpId || regnr);
+  run.cacheKey = cacheKey;
+  if (evalCache[cacheKey]) {
+    console.log(`[v2-eval] cache-hit ${cacheKey} — skip (evaluert ${evalCache[cacheKey]})`);
+    run.skipReason = 'cached';
+    return finish(run, { ...opts, noTelegram: true, noPush: true });
+  }
 
   try {
     run.steps.data = await collectAllData(regnr, km);
@@ -227,6 +240,12 @@ async function finish(run, opts = {}) {
     } catch (e) {
       console.error('  -> Pulse-push exception (ikke kritisk):', e.message);
     }
+  }
+
+  if (run.errors.length === 0 && !run.skipReason) {
+    evalCache[run.cacheKey] = new Date().toISOString();
+    try { writeFileSync(EVAL_CACHE_FILE, JSON.stringify(evalCache, null, 2)); }
+    catch (e) { console.error(`[v2-eval] cache write feilet: ${e.message}`); }
   }
 
   return run;
