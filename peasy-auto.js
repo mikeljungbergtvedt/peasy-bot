@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.72';
+const VERSION = 'v20.73';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2194,12 +2194,14 @@ async function evalCar(bil, page, cache, opts = {}) {
 // ── Kjoring ───────────────────────────────────────────────────
 const nodemailer = require('nodemailer');
 const FLUSH_MAIL_TO = 'mike@autoringen.no';
-async function sendMail(subject, body) {
+async function sendMail(subject, body, opts = {}) {
   try {
     const user = process.env.IMAP_USER || process.env.EMAIL_USER;
     const t = nodemailer.createTransport({ host: 'exchange.tornado.email', port: 587, secure: false, auth: { user, pass: process.env.IMAP_PASS }, connectionTimeout: 10000, greetingTimeout: 10000 });
-    const info = await t.sendMail({ from: 'Peasy Bot <' + user + '>', to: FLUSH_MAIL_TO, subject, text: body });
-    log('mail sendt til ' + FLUSH_MAIL_TO + ': ' + info.response);
+    const mailOpts = { from: 'Peasy Bot <' + user + '>', to: FLUSH_MAIL_TO, subject, text: body };
+    if (opts.cc) mailOpts.cc = opts.cc;
+    const info = await t.sendMail(mailOpts);
+    log('mail sendt til ' + FLUSH_MAIL_TO + (opts.cc ? ' (cc: ' + opts.cc + ')' : '') + ': ' + info.response);
     return true;
   } catch (e) { logErr('sendMail', e); return false; }
 }
@@ -2889,7 +2891,7 @@ async function checkListeWatch(force = false) {
     if (seksjoner.length) {
       await sendTelegram('📋 <b>STUCK-OVERSIKT ' + hhmm + '</b> — ' + totalt + ' biler står på vent\n\n' + seksjoner.join('\n\n'));
       log('Stuck-oversikt sendt: ' + totalt + ' biler');
-      await sendMail('STUCK-OVERSIKT ' + hhmm + ' - ' + totalt + ' biler staar paa vent', 'STUCK-OVERSIKT ' + hhmm + ' - ' + totalt + ' biler staar paa vent\n\n' + seksjoner.join('\n\n').replace(/<\/?b>/g, ''));
+      await sendMail('STUCK-OVERSIKT ' + hhmm + ' - ' + totalt + ' biler staar paa vent', 'STUCK-OVERSIKT ' + hhmm + ' - ' + totalt + ' biler staar paa vent\n\n' + seksjoner.join('\n\n').replace(/<\/?b>/g, ''), { cc: 'post@peasy.no' });
     } else {
       log('Stuck-oversikt: ingen biler på liste 8-12');
     }
