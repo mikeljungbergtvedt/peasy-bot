@@ -24,7 +24,7 @@ import { buildEvalCard } from './telegram-v2.js';
 import { sendTelegram } from './telegram-bot.js';
 import { checkBrregForRegnr } from './brreg.js';
 
-const VERSION = 'peasy-bot v1.13';
+const VERSION = 'peasy-bot v1.14';
 const CACHE_FILE = '/Users/bot/peasy-pricing-v2/peasy-cache.json';
 const SCHEDULE_HOURS = { start: 7, end: 19 };
 
@@ -69,9 +69,21 @@ async function evalCar(bil, token) {
       const _euMaxKm = Math.max(0, ..._insp.map(e => Number(e.km) || 0));
       if (_euMaxKm > 0 && km > 0 && _euMaxKm > km) {
         log('[km-override] ' + regnr + ': EU ' + _euMaxKm + ' > oppgitt ' + km + ' — bruker EU-km');
-        kmOverride = { from: km, to: _euMaxKm };
+        kmOverride = { from: km, to: _euMaxKm, reason: 'eu' };
         km = _euMaxKm;
         bil.mileage = _euMaxKm;
+      }
+      // v1.14: km-typo-fix — hvis oppgitt > 2x EU, prøv å fjerne siste siffer
+      if (_euMaxKm > 0 && km > _euMaxKm * 2) {
+        const _candidate = Math.floor(km / 10);
+        if (_candidate >= _euMaxKm && _candidate <= _euMaxKm * 1.5) {
+          log('[km-typo-fix] ' + regnr + ': oppgitt ' + km + ' → ' + _candidate + ' (fjernet siste siffer, EU=' + _euMaxKm + ')');
+          kmOverride = { from: km, to: _candidate, reason: 'typo' };
+          km = _candidate;
+          bil.mileage = _candidate;
+        } else {
+          log('[km-typo-mistanke] ' + regnr + ': oppgitt ' + km + ' >> EU ' + _euMaxKm + ' — kunne ikke auto-rette');
+        }
       }
     } catch (e) {}
     const companyRaw = ci.valuation?.company_valuation?.classifieds || [];

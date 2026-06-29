@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.74';
+const VERSION = 'v20.75';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1941,7 +1941,20 @@ async function evalCar(bil, page, cache, opts = {}) {
     if (_euMaxKm > 0 && _oppgittKm > 0 && _euMaxKm > _oppgittKm) {
       log(`[km-override] ${regnr}: EU ${_euMaxKm} > oppgitt ${_oppgittKm} — bruker EU-km`);
       bil.mileage = _euMaxKm;
-      kmOverride = { from: _oppgittKm, to: _euMaxKm };
+      kmOverride = { from: _oppgittKm, to: _euMaxKm, reason: 'eu' };
+    }
+    // v20.75: km-typo-fix — hvis oppgitt > 2x EU, prøv å fjerne siste siffer
+    if (_euMaxKm > 0 && _oppgittKm > _euMaxKm * 2) {
+      const _candidate = Math.floor(_oppgittKm / 10);
+      if (_candidate >= _euMaxKm && _candidate <= _euMaxKm * 1.5) {
+        log(`[km-typo-fix] ${regnr}: oppgitt ${_oppgittKm} → ${_candidate} (fjernet siste siffer, EU=${_euMaxKm})`);
+        bil.mileage = _candidate;
+        kmOverride = { from: _oppgittKm, to: _candidate, reason: 'typo' };
+      } else {
+        log(`[km-typo-mistanke] ${regnr}: oppgitt ${_oppgittKm} >> EU ${_euMaxKm} (faktor ${(_oppgittKm/_euMaxKm).toFixed(1)}) — kunne ikke auto-rette`);
+        // Lar bilen gå gjennom men flagger via kmOverride for synlighet i kort
+        kmOverride = { from: _oppgittKm, to: _oppgittKm, reason: 'typo_uklart', eu: _euMaxKm };
+      }
     }
 
     // 2-5. V2 prisemotor (erstatter Finn-scrape + gammelt anker)
