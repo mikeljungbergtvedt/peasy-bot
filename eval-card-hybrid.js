@@ -84,6 +84,10 @@ function formatEvalCardHybrid(p, forErp = false) {
     (p.imageCount && p.imageCount > 0) ? `🖼️ ${p.imageCount}` : '',
   ].filter(Boolean).join(' | ');
   out.push(forErp ? carLine : I(carLine));
+  // v20.70: km-override-linje (vises kun når oppgitt km ble overstyrt av EU-kontroll)
+  if (p.kmOverride) {
+    out.push(`🔄 Km endret: ${nf(p.kmOverride.from || 0)} → ${nf(p.kmOverride.to || 0)} (EU-kontroll)`);
+  }
   out.push('');
 
   // ── 3. Bilmodell-blokk ───────────────────────────────────────

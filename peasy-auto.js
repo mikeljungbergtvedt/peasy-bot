@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.69';
+const VERSION = 'v20.70';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1392,6 +1392,10 @@ function buildManualCard(regnr, erpId, bil, vegData, reason) {
 function formatEvalCard(p, forErp = false) {
   const source = (p.bil.source || '').toLowerCase() === 'driveno' ? 'DRIVE' : 'PEASY';
   const qaTag = p.qaOverride ? ' \u26a1 QA OVERRIDE' : '';
+  // v20.70: km-override-linje (vises kun n\u00e5r oppgitt km ble overstyrt av EU-kontroll)
+  const kmOverrideLine = p.kmOverride
+    ? `\ud83d\udd04 Km endret: ${(p.kmOverride.from || 0).toLocaleString('nb-NO')} \u2192 ${(p.kmOverride.to || 0).toLocaleString('nb-NO')} (EU-kontroll)`
+    : null;
   const seg = p.seg || {};
   const val = p.valuation || {};
   const isEl = (p.vegData.fuel || '').toLowerCase().includes('elektr');
@@ -1564,7 +1568,9 @@ D lav \u2013 D hoy: ${val.dLav?.toLocaleString('nb-NO') || '?'} \u2013 ${val.dHo
   // CA-07: bygg lines med funnelLines etter finnSokHeader
   const lines = forErp ? [
     `${source} BIL TIL ESTIMERING${qaTag}`,
-    carLine, '',
+    carLine,
+    ...(kmOverrideLine ? [kmOverrideLine] : []),
+    '',
     ...(bilmodellBlokk ? [bilmodellBlokk, ''] : []),
     segLine, finnSokLine, prevLine, '',
     `FINN-SOK ${p.vegData.fuel} | ${(p.bil.carInfo && p.bil.carInfo.model_year) || p.bil.model_year || ''} | ${p.totalCount} treff | ${p.finnUrl}`,
@@ -1577,7 +1583,9 @@ D lav \u2013 D hoy: ${val.dLav?.toLocaleString('nb-NO') || '?'} \u2013 ${val.dHo
     ...(p.bil.id ? ['ERP', erpLines] : []),
   ] : [
     `<b>${source} BIL TIL ESTIMERING${qaTag}</b>`,
-    `<i>${carLine}</i>`, '',
+    `<i>${carLine}</i>`,
+    ...(kmOverrideLine ? [kmOverrideLine] : []),
+    '',
     ...(bilmodellBlokk ? [bilmodellBlokk, ''] : []),
     `<b>Finn-søk:</b> ${p.vegData.fuel} | ${(p.bil.carInfo && p.bil.carInfo.model_year) || p.bil.model_year || ''} | fra ${Math.max(0,(p.bil.mileage||0)-segKmBand).toLocaleString('nb-NO')} – maks ${((p.bil.mileage || 0) + segKmBand).toLocaleString('nb-NO')} km | spread ${segSpread}`,
     prevLine, '',
@@ -1679,9 +1687,7 @@ async function evalCar(bil, page, cache, opts = {}) {
       const insp = (o.history || []).filter(h => h && h.type === 'inspection');
       euMaxKm = Math.max(0, ...insp.map(e => Number(e.km) || 0));
     } catch (e) {}
-    if (euMaxKm > 0 && oppgittKm > 0 && euMaxKm > oppgittKm * 1.05) {
-      blockers.push('km_konflikt_eu_' + euMaxKm + '_oppgitt_' + oppgittKm);
-    }
+    // v20.70: km_konflikt-blokker fjernet — km-override gjøres oppstrøms i evalCar
     if (Number(o.dLav) < 3000) blockers.push('d_lav_under_vrakpant_' + o.dLav);
     return blockers;
   }
@@ -1924,6 +1930,20 @@ async function evalCar(bil, page, cache, opts = {}) {
     }
     log(`Vegvesen: ${vegData.fuel} | ${vegData.gearbox} | ${vegData.drive} | ${vegData.kw}kW | karosseri hentes fra ERP`);
 
+    // v20.70: km-override fra EU-kontroll — EU-km autoritativ (Statens vegvesen)
+    const _oppgittKm = Number(bil.mileage) || 0;
+    let _euMaxKm = 0;
+    try {
+      const _insp = ((bil.carInfo && bil.carInfo.history) || []).filter(h => h && h.type === 'inspection');
+      _euMaxKm = Math.max(0, ..._insp.map(e => Number(e.km) || 0));
+    } catch (e) {}
+    let kmOverride = null;
+    if (_euMaxKm > 0 && _oppgittKm > 0 && _euMaxKm > _oppgittKm) {
+      log(`[km-override] ${regnr}: EU ${_euMaxKm} > oppgitt ${_oppgittKm} — bruker EU-km`);
+      bil.mileage = _euMaxKm;
+      kmOverride = { from: _oppgittKm, to: _euMaxKm };
+    }
+
     // 2-5. V2 prisemotor (erstatter Finn-scrape + gammelt anker)
     const seg = identifySegment(bil.model_year || vegData.firstRegYear || 0, bil.mileage || 0);
     log(`Segment: ${seg.label} | alder=${seg.age}y | km/y=${seg.kmPerYear ? seg.kmPerYear.toLocaleString('nb-NO') : '?'}`);
@@ -2004,7 +2024,8 @@ async function evalCar(bil, page, cache, opts = {}) {
           bil: bil, vegData: vegData, pool: poolF, anchor: anchorF, finnUrl: rF.finnUrl, totalCount: rF.totalCount, seg: segF,
           finnListing: finnSelf, brreg: brregF, valuation: valuationF, sdComment: sdCommentF, imageCount: imageCountF,
           erpWritten: erpWrittenF, erpVerify: erpVerifyF, chatPosted: false, qaOverride: false,
-          funnelSteps: (rF && rF.funnelSteps) || [], prevEvals: getPrevEvals(regnr, erpId)
+          funnelSteps: (rF && rF.funnelSteps) || [], prevEvals: getPrevEvals(regnr, erpId),
+          kmOverride
         };
         const merkeF = '⚠️ FALLBACK: Finn-basert anker (v2 feilet: ' + v2feil + ')\n\n';
         const chatPostedF = await maybePostToChat(bil, erpId, merkeF + formatEvalCard(cardF, true), tokenF);
@@ -2019,7 +2040,7 @@ async function evalCar(bil, page, cache, opts = {}) {
             registration_number: regnr, id: erpId, model_year: bil.model_year,
             mileage: bil.mileage, model_series: bil.model_series,
             make: vegData ? vegData.make : (bil.make || ''),
-            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: easyConfidence, begrunnelse_kort: easyBegr, anker_kilde: 'finn' }
+            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: easyConfidence, begrunnelse_kort: easyBegr, anker_kilde: 'finn', km_override: kmOverride }
           });
           fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2PayloadF + '\n');
           log('[easy->v2] Matet shadow (fallback) for ' + regnr);
@@ -2110,6 +2131,7 @@ async function evalCar(bil, page, cache, opts = {}) {
       soldForhandler: (v2.soldForhandler || []), soldPrivat: (v2.soldPrivat || []),
       prevEvals: getPrevEvals(regnr, erpId),
       erpWritten, erpVerify, chatPosted: false, qaOverride: !!qaOverrideUrl,
+      kmOverride,
     };
     const erpText = formatEvalCardHybrid(cardParams, true);
     const chatPosted = await maybePostToChat(bil, erpId, erpText, token);
@@ -2150,7 +2172,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           registration_number: regnr, id: erpId, model_year: bil.model_year,
           mileage: bil.mileage, model_series: bil.model_series,
           make: vegData ? vegData.make : (bil.make || ''),
-          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde }
+          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride }
         });
         fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2Payload + '\n');
         log('[easy->v2] Matet shadow for ' + regnr);

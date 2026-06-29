@@ -24,7 +24,7 @@ import { buildEvalCard } from './telegram-v2.js';
 import { sendTelegram } from './telegram-bot.js';
 import { checkBrregForRegnr } from './brreg.js';
 
-const VERSION = 'peasy-bot v1.11';
+const VERSION = 'peasy-bot v1.13';
 const CACHE_FILE = '/Users/bot/peasy-pricing-v2/peasy-cache.json';
 const SCHEDULE_HOURS = { start: 7, end: 19 };
 
@@ -37,7 +37,8 @@ function saveCache(c) { fs.writeFileSync(CACHE_FILE, JSON.stringify(c, null, 2))
 async function evalCar(bil, token) {
   const regnr = String(bil.registration_number || '').trim().toUpperCase();
   const erpId = bil.id;
-  const km = bil.mileage || 0;
+  let km = bil.mileage || 0;
+  let kmOverride = null;
   log('=== Evaluerer ' + regnr + ' (erpId=' + erpId + ') ===');
   try {
     // 1. Hent full bil-detalj fra ERP (selvdeklarasjon, beskrivelse, bilder, body_type)
@@ -62,6 +63,17 @@ async function evalCar(bil, token) {
     // 2. v2 pipeline (car.info comps + Sonnet anker + Easy-formel pricing)
     const data = await collectAllData(regnr, km);
     const ci = data?.sources?.car_info?.result || {};
+    // v1.13: km-override fra EU-kontroll — EU-km autoritativ (Statens vegvesen)
+    try {
+      const _insp = ((ci && ci.history) || []).filter(h => h && h.type === 'inspection');
+      const _euMaxKm = Math.max(0, ..._insp.map(e => Number(e.km) || 0));
+      if (_euMaxKm > 0 && km > 0 && _euMaxKm > km) {
+        log('[km-override] ' + regnr + ': EU ' + _euMaxKm + ' > oppgitt ' + km + ' — bruker EU-km');
+        kmOverride = { from: km, to: _euMaxKm };
+        km = _euMaxKm;
+        bil.mileage = _euMaxKm;
+      }
+    } catch (e) {}
     const companyRaw = ci.valuation?.company_valuation?.classifieds || [];
     const privateRaw = ci.valuation?.private_classifieds || [];
     const all = [
@@ -111,15 +123,7 @@ async function evalCar(bil, token) {
       const _cmt = (sdComment || '').toString();
       const _kjorbar = /reparasjonsobjekt|starter ikke|motor.*defekt|delebil|motorstopp|registerreim|totalskade/i.test(_cmt) ? 'nei' : (_cmt ? 'usikker' : 'ja');
       if (_kjorbar === 'nei') blockers.push('selger_sier_ikke_kjorbar');
-      const _oppgittKm = Number(km) || 0;
-      let _euMaxKm = 0;
-      try {
-        const _insp = ((ci && ci.history) || []).filter(h => h && h.type === 'inspection');
-        _euMaxKm = Math.max(0, ..._insp.map(e => Number(e.km) || 0));
-      } catch (e) {}
-      if (_euMaxKm > 0 && _oppgittKm > 0 && _euMaxKm > _oppgittKm * 1.05) {
-        blockers.push('km_konflikt_eu_' + _euMaxKm + '_oppgitt_' + _oppgittKm);
-      }
+      // v1.13: km_konflikt-blokker fjernet — km-override gjøres oppstrøms i evalCar
       const _valgte = (anchor && Array.isArray(anchor.valgte_comps)) ? anchor.valgte_comps : [];
       if (_valgte.length < 3) blockers.push('kun_' + _valgte.length + '_ekte_sosterbiler');
       if (Number(dLav) < 3000) blockers.push('d_lav_under_vrakpant_' + dLav);
