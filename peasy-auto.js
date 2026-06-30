@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.76';
+const VERSION = 'v20.77';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1769,6 +1769,16 @@ async function evalCar(bil, page, cache, opts = {}) {
     const carInfo = await getCarInfoFetch(regnr);
     const elbilRad = vegData.fuel && /el/i.test(vegData.fuel) ? await getElbilradarFetch(regnr, page) : null;
     const peasyVariant = (carInfo?.variant || '').trim();
+  // v20.77: elbilradar-cache for V2 (bypass 403). Skriver til delt fil etter vellykket fetch.
+  if (elbilRad) {
+    try {
+      const _ecPath = '/Users/bot/peasy-auto/elbilradar-cache.json';
+      let _ec = {};
+      try { _ec = JSON.parse(fs.readFileSync(_ecPath, 'utf8')); } catch (e) {}
+      _ec[regnr] = { data: elbilRad, ts: new Date().toISOString() };
+      fs.writeFileSync(_ecPath, JSON.stringify(_ec, null, 2));
+    } catch (e) { logErr('elbilradar-cache-write', e); }
+  }
   // PEASY: lagre elbilradar pakke + utstyr paa bil (brukt i kort og Finn-soek)
   if (elbilRad) {
     bil.pakke = elbilRad.pakke || null;

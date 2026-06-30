@@ -2,7 +2,7 @@
 // Henter ALT relevant for å bestemme ankerpris på en bil:
 //   - car.info (classifieds + valuation + history + alerts + packages)
 //   - Vegvesen (avregistrert, bruktimport, motor, karosseri)
-//   - elbilradar (kun EV)
+//   - elbilradar (kun EV)  [v1.15: cache fra Easy for å bypass 403]
 //
 // Returnerer ett samlet aggregat-objekt som sendes til AI-anchor.
 //
@@ -11,6 +11,7 @@
 //   const data = await collectAllData('BT65230', 154000);
 
 import 'dotenv/config';
+import { readFileSync, existsSync } from 'fs';
 
 const T_CARINFO  = +process.env.TIMEOUT_CARINFO  || 12000;
 const T_VEGVESEN = +process.env.TIMEOUT_VEGVESEN || 10000;
@@ -124,7 +125,29 @@ export async function fetchVegvesen(regnr) {
 }
 
 // ----- elbilradar (kun EV) ------------------------------------------------
+// v1.15: les fra Easy sin elbilradar-cache først (Easy henter via Cloudflare-bypass).
+// Fall back til direkte HTTP (typisk 403 fra V2 uten browser-context).
+const ELBIL_CACHE_FILE = '/Users/bot/peasy-auto/elbilradar-cache.json';
+const ELBIL_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function tryElbilradarCache(regnr) {
+  try {
+    if (!existsSync(ELBIL_CACHE_FILE)) return null;
+    const cache = JSON.parse(readFileSync(ELBIL_CACHE_FILE, 'utf8'));
+    const entry = cache[regnr];
+    if (!entry || !entry.data) return null;
+    const age = Date.now() - new Date(entry.ts).getTime();
+    if (age > ELBIL_CACHE_MAX_AGE_MS) return null;
+    return entry.data;
+  } catch (e) { return null; }
+}
+
 export async function fetchElbilradar(regnr) {
+  // v1.15: prøv Easy-cache først
+  const cached = tryElbilradarCache(regnr);
+  if (cached) {
+    return { ok: true, data: { title: cached.title || '', variantLine: cached.variantLine || null, modelFull: cached.modelFull || null, pakke: cached.pakke || null, equipment: cached.equipment || [], source: 'easy-cache' } };
+  }
   try {
     const url = `https://elbilradar.com/elbil_data.php?regnr=${regnr.replace(/\s/g,'')}`;
     const res = await fetchWithTimeout(url, {

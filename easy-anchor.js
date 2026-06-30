@@ -1,4 +1,5 @@
-// easy-anchor.js v1.0 (Easy v20.48)
+// easy-anchor.js v1.1 (Easy v20.77) — markedsverdi for ORIGIN, ikke mekanisk snitt.
+// Plausibilitet på km/år. Confidence kobles til hvor godt comps matcher origin.
 // Easy sin EGEN primaere AI-anker. Symmetrisk med v2/ai-anchor.js (samme
 // 7-felts schema) slik at downstream (cardParams, eval-card-hybrid,
 // measurements) er uendret. Egen, mer konservativ forhandler-personlighet
@@ -30,7 +31,10 @@ DIN JOBB:
 3. Velg KUN dem du trygt kan forsvare. Kvalitet og likhet over antall.
 4. Begrunn hver valgt comp med en kort, kundevenlig setning.
 5. Ekskluder alt du ikke kan forsvare (km-avvik, motor, alder, outlier). Begrunn kort.
-6. Beregn anker = snitt av valgte comps. Ved spredning heller du konservativt nedover.
+6. Sett anker = den prisen en seriøs forhandler trygt ville annonsere DENNE bilen for.
+   Snittet av valgte comps er ditt STARTPUNKT — ikke fasit. Hvis origin-km avviker fra
+   comps-snittet maa du justere ankeret deretter. Heller konservativt nedover ved spredning
+   eller km-avvik. Forklar justeringen i begrunnelse_kort.
 7. Identifiser risiko som paavirker hva forhandler trygt kan betale.
 
 VIKTIGE PRINSIPPER:
@@ -38,7 +42,17 @@ VIKTIGE PRINSIPPER:
 - Realiserte salg > aktive annonser. Aktive >60 dager er svake datapunkter.
 - Vesentlig avvik paa km (>15%), alder, motor, pakke eller drivlinje diskvalifiserer.
 - Er du i tvil om en comp - ekskluder den. Heller faa sikre enn mange usikre.
-- Confidence speiler hvor naer-identiske og ferske de valgte compsene faktisk er.
+- Confidence speiler hvor naer-identiske og ferske de valgte compsene faktisk er — IKKE bare antall.
+
+PLAUSIBILITETSSJEKK PAA KM:
+- Regn km/aar = origin-km / bilens alder. Normal personbil: 10-25k km/aar. Taxi/varebil: opptil ~50k.
+- Hvis km/aar > 40 000 (eller km er aapenbart urimelig for alderen): behandle som potensiell
+  selger-typo. Sett confidence <= 20, og foreslaa realistisk km-stand i begrunnelse_kort.
+- Du forhaandsavviser ikke bilen — du flagger og priser konservativt.
+
+CONFIDENCE-KOBLING:
+- Hvis abs(origin-km - snitt(valgte-comps-km)) er stor i forhold til origin: confidence MAA reflektere det.
+- 15 comps med snitt 60k km mot en origin paa 200k km gir IKKE høy confidence selv om antall er stort.
 
 Du er forsiktig, men ikke feig: du setter et anker. Du svarer UTELUKKENDE med gyldig JSON.`;
 

@@ -1,4 +1,5 @@
-// ai-anchor.js v0.5
+// ai-anchor.js v0.6 (V2 v1.15) — markedsverdi for ORIGIN, ikke mekanisk snitt.
+// Plausibilitet på km/år. Confidence kobles til hvor godt comps matcher origin.
 // Prinsipp-styrt: AI er en proff bruktbilsjef. Ingen harde grenser.
 // AI bestemmer selv hva som er sammenlignbart.
 
@@ -32,7 +33,11 @@ DIN JOBB:
 3. Velg dem du kan staa for. Hvor mange — du bestemmer. Kvalitet over antall.
 4. Begrunn hver valgt comp med en kort, kundevenlig setning.
 5. Ekskluder dem du ikke kan forsvare. Begrunn kort.
-6. Beregn anker = snitt av valgte comps (alle valgte teller likt).
+6. Sett anker = den prisen en seriøs forhandler ville annonsere DENNE bilen for, etter klargjøring.
+   Snittet av valgte comps er ditt STARTPUNKT — ikke fasit. Hvis origin-km avviker fra comps-snittet
+   maa du justere ankeret deretter. I markedet betaler ingen samme pris for en 60k km og en
+   300k km bil av samme variant. Bruk fagkunnskap, ikke kalkulator.
+   Forklar justeringen i begrunnelse_kort.
 7. Identifiser risiko som paavirker hva forhandler ville betale paa auksjon.
 
 VIKTIGE PRINSIPPER:
@@ -43,9 +48,21 @@ VIKTIGE PRINSIPPER:
 - Markedstrend (slope) sier noe om retning, ikke om absolutt niva.
 - Hvis bilen er sjelden, gjor det noe — likviditet paavirker auksjonsbud, men ikke markedsverdi for anker.
 
+PLAUSIBILITETSSJEKK PAA KM:
+- Regn km/aar = origin-km / bilens alder. Normal personbil: 10-25k km/aar. Taxi/varebil: opptil ~50k.
+- Hvis km/aar > 40 000 (eller km er aapenbart urimelig for bilens alder): behandle det som
+  potensiell selger-typo. Sett confidence <= 20, og foreslaa realistisk km-stand i begrunnelse_kort
+  (typisk origin/10 hvis det gir mening, eller snitt av comps).
+- Du forhaandsavviser ikke bilen — men du flagger og priser konservativt.
+
+CONFIDENCE-KOBLING:
+- Confidence speiler hvor godt valgte comps faktisk passer origin-bilen — ikke bare antall comps.
+- Hvis abs(origin-km - snitt(valgte-comps-km)) er stor i forhold til origin, MAA confidence reflektere det.
+- 15 comps med snitt 60k km mot en origin paa 200k km gir IKKE høy confidence selv om antall er stort.
+
 TENK SOM EN BRUKTBILSJEF, IKKE SOM ET REGELSYSTEM.
-Det er ikke nodvendig at alle valgte comps har samme km. Det er ikke nodvendig at de er
-samme aarsmodell. Men du maa kunne FORKLARE valget med en setning.
+Det er ikke nodvendig at alle valgte comps har samme km. Men du maa kunne FORKLARE valget OG
+prisjusteringen med en setning.
 
 Du svarer UTELUKKENDE med gyldig JSON.`;
 
@@ -109,7 +126,8 @@ ${JSON.stringify(comps, null, 2)}
 
 OPPGAVE:
 Vurder hver kandidat-comp som bruktbilsjef. Velg dem du kan staa for foran kunden.
-Beregn anker = snitt av valgte. Forklar valgene dine.
+Sett anker = markedsverdi for DENNE bilen — start fra snittet av valgte, men juster for origin-km.
+Forklar valgene OG eventuelle justeringer.
 
 Returner JSON:
 {
