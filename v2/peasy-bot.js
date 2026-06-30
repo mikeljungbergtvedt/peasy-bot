@@ -24,7 +24,7 @@ import { buildEvalCard } from './telegram-v2.js';
 import { sendTelegram } from './telegram-bot.js';
 import { checkBrregForRegnr } from './brreg.js';
 
-const VERSION = 'peasy-bot v1.15';
+const VERSION = 'peasy-bot v1.16';
 const CACHE_FILE = '/Users/bot/peasy-pricing-v2/peasy-cache.json';
 const SCHEDULE_HOURS = { start: 7, end: 19 };
 
@@ -271,13 +271,10 @@ async function tgPollLoop() {
 
 async function main() {
   log(VERSION + ' startet');
-  log('Schedule: hver hele time ' + SCHEDULE_HOURS.start + ':00-' + SCHEDULE_HOURS.end + ':00, man-soen');
+  // v1.16: auto-polling deaktivert. V2 priser via v2-watcher som hører på Easy shadow-queue.
+  // /run-kommandoen i Telegram triggrer fortsatt manuell runOnce() ved behov.
+  log('Auto-polling AV. V2 priser via shadow-queue fra Easy. /run trigger manuell sjekk.');
   tgPollLoop().catch(e => console.error('[tgPollLoop]', e));
-  setInterval(async () => {
-    if (shouldRunNow()) {
-      await runOnce();
-    }
-  }, 60 * 1000);
 }
 
 main().catch(e => { console.error('FATAL', e); process.exit(1); });

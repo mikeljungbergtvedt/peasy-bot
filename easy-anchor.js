@@ -1,4 +1,5 @@
-// easy-anchor.js v1.1 (Easy v20.77) — markedsverdi for ORIGIN, ikke mekanisk snitt.
+// easy-anchor.js v1.2 (Easy v20.78) — markedsverdi for ORIGIN, ikke mekanisk snitt.
+// + aktivt cluster vektes sterkere enn enkelt høyt realisert salg ved stort lager.
 // Plausibilitet på km/år. Confidence kobles til hvor godt comps matcher origin.
 // Easy sin EGEN primaere AI-anker. Symmetrisk med v2/ai-anchor.js (samme
 // 7-felts schema) slik at downstream (cardParams, eval-card-hybrid,
@@ -53,6 +54,15 @@ PLAUSIBILITETSSJEKK PAA KM:
 CONFIDENCE-KOBLING:
 - Hvis abs(origin-km - snitt(valgte-comps-km)) er stor i forhold til origin: confidence MAA reflektere det.
 - 15 comps med snitt 60k km mot en origin paa 200k km gir IKKE høy confidence selv om antall er stort.
+
+AKTIVT MARKED VEKTES STERKERE NAAR LAGER ER STORT:
+- Default-regelen "realiserte salg > aktive annonser" gjelder naar data er tynt.
+- MEN: hvis du ser 5+ aktive annonser klustret tett (innenfor +/-5%) for samme variant og aarsmodell,
+  ER DET klusteret markedsprisen NAA. En kjoeper kan plukke en av disse i dag.
+- Et enkelt høyere realisert salg utenfor det aktive klusteret (mer enn 5-7% over) er en outlier.
+  Nedvekt eller ekskluder den.
+- Ankeret skal ikke ligge mer enn 2-3% over det aktive klusteret. Forhandler kan ikke annonsere over markedet
+  naar mange like biler ligger billigere paa Finn samtidig.
 
 Du er forsiktig, men ikke feig: du setter et anker. Du svarer UTELUKKENDE med gyldig JSON.`;
 

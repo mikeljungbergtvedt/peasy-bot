@@ -1,4 +1,5 @@
-// ai-anchor.js v0.6 (V2 v1.15) — markedsverdi for ORIGIN, ikke mekanisk snitt.
+// ai-anchor.js v0.7 (V2 v1.16) — markedsverdi for ORIGIN, ikke mekanisk snitt.
+// + aktivt cluster vektes sterkere enn enkelt høyt realisert salg ved stort lager.
 // Plausibilitet på km/år. Confidence kobles til hvor godt comps matcher origin.
 // Prinsipp-styrt: AI er en proff bruktbilsjef. Ingen harde grenser.
 // AI bestemmer selv hva som er sammenlignbart.
@@ -59,6 +60,15 @@ CONFIDENCE-KOBLING:
 - Confidence speiler hvor godt valgte comps faktisk passer origin-bilen — ikke bare antall comps.
 - Hvis abs(origin-km - snitt(valgte-comps-km)) er stor i forhold til origin, MAA confidence reflektere det.
 - 15 comps med snitt 60k km mot en origin paa 200k km gir IKKE høy confidence selv om antall er stort.
+
+AKTIVT MARKED VEKTES STERKERE NAAR LAGER ER STORT:
+- Default-regelen "realiserte salg > aktive annonser" gjelder naar data er tynt.
+- MEN: hvis du ser 5+ aktive annonser klustret tett (innenfor +/-5%) for samme variant og aarsmodell,
+  ER DET klusteret markedsprisen NAA. En kjoeper kan plukke en av disse i dag.
+- Et enkelt høyere realisert salg utenfor det aktive klusteret (mer enn 5-7% over) er en outlier,
+  ikke en referansepris. Nedvekt eller ekskluder den.
+- Ankeret skal ikke ligge mer enn 2-3% over det aktive klusteret. Forhandler kan ikke annonsere over markedet
+  naar 8 like biler ligger billigere paa Finn samtidig.
 
 TENK SOM EN BRUKTBILSJEF, IKKE SOM ET REGELSYSTEM.
 Det er ikke nodvendig at alle valgte comps har samme km. Men du maa kunne FORKLARE valget OG

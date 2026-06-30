@@ -47,7 +47,7 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 
-const VERSION = 'v20.77';
+const VERSION = 'v20.78';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -806,6 +806,8 @@ function cleanModelSeries(make, modelSeries) {
   if (makeFirst && m.toLowerCase().startsWith(makeFirst + ' ')) {
     m = m.substring(makeFirst.length + 1).trim();
   }
+  // v20.78: strip "NN kWh" (batteristørrelse) overalt i strengen
+  m = m.replace(/\s*\d+(?:[.,]\d+)?\s*kWh\b/gi, '').trim();
   // Strip trailing tall + kW/KW (motorstyrke kW)
   m = m.replace(/\s+\d+\s*[kK][wW]\b.*$/, '').trim();
   // Strip trailing tall + hk/HK (motorstyrke hk)
@@ -814,6 +816,13 @@ function cleanModelSeries(make, modelSeries) {
   m = m.replace(/\s+(EAT[0-9]?|AT[0-9]?|DSG[0-9]?|S-?Tronic|Tiptronic|Multitronic|CVT|AMT)\b.*$/i, '').trim();
   // Strip trailing rene 2-3 sifrede tall (motorstyrke i hk uten suffix, f.eks. '110')
   m = m.replace(/\s+\d{2,3}$/, '').trim();
+  // v20.78: dedupe etterfølgende like ord (case-insensitiv): "e-4ORCE e-4ORCE" → "e-4ORCE"
+  const words = m.split(/\s+/).filter(Boolean);
+  const dedup = [];
+  for (let i = 0; i < words.length; i++) {
+    if (i === 0 || words[i].toLowerCase() !== words[i-1].toLowerCase()) dedup.push(words[i]);
+  }
+  m = dedup.join(' ');
   return m;
 }
 
