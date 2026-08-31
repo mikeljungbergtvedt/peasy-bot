@@ -1312,6 +1312,41 @@ function formatKalkyleBlock(val, anker) {
   ].join('\n');
 }
 
+// Easy datakalibrert v1 — regresjon fra 172 solgte biler 2026.
+// Erstatter Lav = Finn × 0,60 for arm A. V3/V3G urørt.
+const EASY_MODEL = {
+  slope: 0.9169,
+  intercept: -15747,
+  lavOffset: -12000,
+  hoyOffset: 12000,
+  vrakpantGulv: 5000,
+  vrakpantLavPct: 0.50,
+  vrakpantHoyPct: 0.75,
+  modellTak: 0.95,
+  minSpread: 5000
+};
+
+function easyKalkyle(anker) {
+  const M = EASY_MODEL;
+  const regMed = anker * M.slope + M.intercept;
+  const regLav = regMed + M.lavOffset;
+  let dLav, dHoy;
+  if (regLav < M.vrakpantGulv) {
+    dLav = Math.max(M.vrakpantGulv, anker * M.vrakpantLavPct);
+    dHoy = anker * M.vrakpantHoyPct;
+  } else {
+    dLav = regLav;
+    dHoy = regMed + M.hoyOffset;
+  }
+  dHoy = Math.min(dHoy, anker * M.modellTak);
+  if (dHoy - dLav < M.minSpread) dHoy = dLav + M.minSpread;
+  return {
+    dLav: Math.round(dLav / 1000) * 1000,
+    dHoy: Math.round(dHoy / 1000) * 1000,
+    model: 'easy-data-v1'
+  };
+}
+
 function calcValuation(anchorPrice, segment, pool) {
   // MARGIN_TABLE — identisk med aj
   const MARGIN_TABLE = [
@@ -1329,23 +1364,14 @@ function calcValuation(anchorPrice, segment, pool) {
   const fee = feeEntry.fee;
   const dMid = T - fee;
 
-  // Segment-spesifikk spread — total spread, lik fordelt på hver side av D mid
-  // Premium: ±3.5% (7% total) | Mid: ±2.5% (5% total) | High-km: ±5% (10% total) | Old/Special: ±7.5% (15% total)
   const SPREAD = {
     normal:  0.05,   // 10% totalt, ±5% fra D mid
     highkm:  0.075,  // 15% totalt, ±7.5% fra D mid
   };
   const spreadPct = SPREAD[segment] || 0.05;
-  const dLavRaw = Math.round(dMid * (1 - spreadPct) / 1000) * 1000;
-
-  // Minimum spread-gulv
-  let spread;
-  if (dLavRaw < 30000)       spread = 2500;
-  else if (dLavRaw < 100000) spread = Math.max(5000, Math.round(dMid * spreadPct / 1000) * 1000);
-  else                       spread = Math.round(dMid * spreadPct / 1000) * 1000;
-
-  const dLav = Math.round((dMid - spread) / 1000) * 1000;
-  let   dHoy = Math.round((dMid + spread) / 1000) * 1000;
+  const ek = easyKalkyle(anchorPrice);
+  const dLav = ek.dLav;
+  let   dHoy = ek.dHoy;
 
   // Comp-cap: D hoy ma alltid vare lavere enn laveste Finn-komp x 0.95
   let compCapApplied = false;
@@ -1369,8 +1395,8 @@ function calcValuation(anchorPrice, segment, pool) {
   const E = Math.round(dLav * (1 + xPct) / 1000) * 1000;
   const auctionTypeId = dLav <= 35000 ? 2 : 1;
 
-  log(`Kalkyle [${segment}]: anker=${anchorPrice} margin=${margin} T=${T} fee=${fee} dMid=${dMid} dLav=${dLav} dHoy=${dHoy} E=${E} (${bracket})`);
-  return { T, t88: T, minMarginUsed: false, margin, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId, spreadPct, compCapApplied, compCapFlag, lowestComp };
+  log(`Kalkyle [easy-data-v1] [${segment}]: anker=${anchorPrice} margin=${margin} T=${T} fee=${fee} dMid=${dMid} dLav=${dLav} dHoy=${dHoy} E=${E} (${bracket})`);
+  return { T, t88: T, minMarginUsed: false, margin, fee, dMid, dLav, dHoy, E, xPct, bracket, auctionTypeId, spreadPct, compCapApplied, compCapFlag, lowestComp, model: 'easy-data-v1' };
 }
 
 // ── Formater eval-kort ────────────────────────────────────────
