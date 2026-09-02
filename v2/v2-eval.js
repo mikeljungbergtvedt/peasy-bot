@@ -8,12 +8,18 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync, writeFileSync } from 'fs';
 
+import { createRequire } from 'module';
 import { collectAllData }     from './data-collector.js';
 import { chooseAnchor }       from './ai-anchor.js';
 import { calculatePricing }   from './pricing-formula.js';
 import { sendV2Eval, buildEvalCard } from './telegram-v2.js';
 import { recordMeasurement }  from './v2-measurements.js';
 import { pushToPulse }       from './v2-push-to-pulse.js';
+
+const require = createRequire(import.meta.url);
+const originCvLib = require('../jr/origin-cv.js');
+const chefRead = require('../jr/read-dossier.js');
+const analogCompsLib = require('../jr/analog-comps.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(__dirname, 'logs');
@@ -70,9 +76,23 @@ export function dedupeComps(comps) {
 }
 
 export async function evalRegnr(regnr, km, opts = {}) {
+  const dossierHit = chefRead.loadForChef({
+    chef: 'v3',
+    erpId: opts.erpId,
+    internnr: opts.internnr || opts.erpId,
+    regnr,
+  });
+  let originCv = opts.originCv || opts.origin_cv || null;
+  if (dossierHit.ok) {
+    originCv = chefRead.preserveOriginKm(dossierHit.origin_cv, null);
+    console.log(`[v3] Jr-dossier ${dossierHit.path} km=${originCv && originCv.km} — hopper over egen Finn/car.info-søk`);
+  }
+  const lockedKm = originCvLib.lockedKm(originCv, km);
   const run = {
-    regnr, km,
+    regnr,
+    km: lockedKm,
     erpId: opts.erpId ?? null,
+    origin_cv: originCv,
     started_at: new Date().toISOString(),
     steps: {},
     errors: [],
@@ -86,17 +106,33 @@ export async function evalRegnr(regnr, km, opts = {}) {
     return finish(run, { ...opts, noTelegram: true, noPush: true });
   }
 
+  if (dossierHit.ok) {
+    run.steps.data = {
+      regnr,
+      km: lockedKm,
+      sources: { jr_dossier: { path: dossierHit.path } },
+      errors: [],
+    };
+    run.origin_cv = originCv;
+    run.km = lockedKm;
+    run.steps.dossier = { path: dossierHit.path, skipOwnSearch: true };
+  } else {
   try {
-    run.steps.data = await collectAllData(regnr, km);
+    run.steps.data = await collectAllData(regnr, lockedKm);
     run.errors.push(...(run.steps.data.errors || []));
   } catch (e) {
     run.errors.push(`data: ${e.message}`);
     return finish(run, opts);
   }
+  }
 
-  const ci = run.steps.data.sources?.car_info?.result || {};
-  const companyRaw = ci.valuation?.company_classifieds || [];
-  const privateRaw = ci.valuation?.private_classifieds || [];
+  const ci = (run.steps.data && run.steps.data.sources && run.steps.data.sources.car_info && run.steps.data.sources.car_info.result) || {};
+  if (originCv && !dossierHit.ok) {
+    run.origin_cv = chefRead.preserveOriginKm(originCv, ci);
+    run.km = originCvLib.lockedKm(run.origin_cv, lockedKm);
+  }
+  const companyRaw = dossierHit.ok ? [] : (ci.valuation?.company_classifieds || []);
+  const privateRaw = dossierHit.ok ? [] : (ci.valuation?.private_classifieds || []);
 
   const allClassifieds = [
     ...companyRaw.map(c => formatClassified(c, 'forhandler')),
@@ -104,10 +140,14 @@ export async function evalRegnr(regnr, km, opts = {}) {
   ];
 
   const { origin, comps: rawComps } = splitOriginAndComps(allClassifieds, regnr);
-  const comps = dedupeComps(rawComps);
-  // V1.1 PATCH: aktivt server-side Finn-regnr-sjekk (uavhengig av car.info classifieds)
+  let comps = originCvLib.dropOwnSold(dedupeComps(rawComps));
+  if (dossierHit.ok) {
+    comps = originCvLib.dropOwnSold(dossierHit.comps || []);
+    if (!comps.length) comps = analogCompsLib.analogComps(dossierHit.dossier);
+  }
+  // V1.1 PATCH: aktivt server-side Finn-regnr-sjekk — hopp over når Jr-dossier styrer søket
   try {
-    const finnHit = await fetchOriginPaaFinn(regnr);
+    const finnHit = dossierHit.ok ? null : await fetchOriginPaaFinn(regnr);
     if (finnHit) {
       const synth = {
         is_active: true,
@@ -162,7 +202,7 @@ export async function evalRegnr(regnr, km, opts = {}) {
 
   run.steps.pricing = calculatePricing({
     anchorPrice,
-    km: Number(km),
+    km: Number(lockedKm),
     modelYear: Number(modelYear),
     lowestComp,
   });

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.peasy.jr-pull</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/bot/peasy-auto/jr/mini-pull.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/bot/peasy-auto</string>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardErrorPath</key>
+  <string>/Users/bot/peasy-auto/logs.nosync/jr-pull.err.log</string>
+  <key>StandardOutPath</key>
+  <string>/Users/bot/peasy-auto/logs.nosync/jr-pull.out.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>JR_WORKDIR</key>
+    <string>/Users/bot/peasy-auto</string>
+    <key>JR_PULL_DEST</key>
+    <string>/Users/bot/peasy-auto/jr</string>
+    <key>JR_PULL_BRANCH</key>
+    <string>main</string>
+  </dict>
+</dict>
+</plist>

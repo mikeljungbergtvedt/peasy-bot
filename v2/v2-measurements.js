@@ -35,6 +35,7 @@ export async function recordMeasurement(run, easyEval) {
     timestamp: run.started_at,
     km: run.km,
     erpId: run.erpId ?? null,
+    origin_cv: run.origin_cv || null,
 
     identifikasjon: {
       variant: id.variant ?? null,

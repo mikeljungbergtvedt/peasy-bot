@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.peasy.jr</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/bot/.nvm/versions/node/v24.14.0/bin/node</string>
+    <string>/Users/bot/peasy-auto/jr/runner.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/bot/peasy-auto</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardErrorPath</key>
+  <string>/Users/bot/peasy-auto/logs.nosync/jr.err.log</string>
+  <key>StandardOutPath</key>
+  <string>/Users/bot/peasy-auto/logs.nosync/jr.out.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/bot/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>JR_DOSSIER_DIR</key>
+    <string>/Users/bot/peasy-auto/jr/dossiers</string>
+    <key>JR_POLL_MS</key>
+    <string>60000</string>
+    <key>WRITES_ERP</key>
+    <string>false</string>
+  </dict>
+</dict>
+</plist>

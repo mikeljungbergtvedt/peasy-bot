@@ -46,6 +46,7 @@ const path = require('path');
 const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
+const originCvLib = require('./origin-cv');
 
 const VERSION = 'v20.78';
 
@@ -1704,9 +1705,13 @@ async function getCvLabelAi(regnr, vegData, elbilRad, finnAdSummary, carInfo) {
 async function evalCar(bil, page, cache, opts = {}) {
   const { qaOverrideUrl = null } = opts;
   const regnr = bil.registration_number;
-  // v19.30: send regnr+km til grok-bot for hver bil
-  sendGrok(regnr, bil.mileage);
   const erpId = bil.id;
+  // Jr trinn 1: lock origin-CV before comps. km = liste 3 nested mileage only.
+  let originCv = originCvLib.buildOriginCv({ liste3Car: bil });
+  const originKm = originCvLib.lockedKm(originCv, null);
+  if (originKm != null) log(`[origin-cv] ${regnr} erp=${erpId} km=${originKm} (liste 3) writes_erp=${originCv.writes_erp}`);
+  // v19.30: send regnr+km til grok-bot for hver bil
+  sendGrok(regnr, originKm != null ? originKm : bil.mileage);
   // v20.53: ALLTID soek regnr paa FINN (vet om bilen er aktiv paa Finn)
   let finnSelf = null; try { finnSelf = await checkFinnListing(regnr, bil, page); } catch (eFs) { logErr(`finnSelf ${regnr}`, eFs); }
   writeFinnLink(erpId, finnSelf);
@@ -1869,6 +1874,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     if (ciEarly) {
       bil.carInfo = ciEarly;
       if (ciEarly.trim_package) bil.pakke = ciEarly.trim_package;
+      originCv = originCvLib.applyCarInfoIdentity(originCv, ciEarly);
     }
   } catch (e) { log('car.info early fetch FEIL: ' + e.message); }
   // PEASY v19.16: AI cv_label for /REGNR test-modus - utenfor elbilradar-if
@@ -1976,7 +1982,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     log(`Vegvesen: ${vegData.fuel} | ${vegData.gearbox} | ${vegData.drive} | ${vegData.kw}kW | karosseri hentes fra ERP`);
 
     // v20.70: km-override fra EU-kontroll — EU-km autoritativ (Statens vegvesen)
-    const _oppgittKm = Number(bil.mileage) || 0;
+    const _oppgittKm = originKm != null ? originKm : (Number(bil.mileage) || 0);
     let _euMaxKm = 0;
     try {
       const _insp = ((bil.carInfo && bil.carInfo.history) || []).filter(h => h && h.type === 'inspection');
@@ -2012,7 +2018,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     try {
       // v20.48: Easy egen primaer AI-anker. Hent data EN gang, kjor Easy AI
       // primaert, V2 AI som fallback paa SAMME data, Finn statistisk siste utvei.
-      const collected = await collectOnly(regnr, bil.mileage || 0);
+      const collected = await collectOnly(regnr, originKm != null ? originKm : (bil.mileage || 0));
       const buildSold = (anchorObj) => {
         const begMap = new Map();
         for (const v of [...((anchorObj && anchorObj.valgte_comps) || []), ...((anchorObj && anchorObj.ekskluderte_comps) || [])]) {
@@ -2040,7 +2046,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         log('Anker fra: Easy AI (v20.48)');
       } catch (easyErr) {
         log('Easy AI ga ugyldig JSON/feilet, fallback V2: ' + (easyErr.message || easyErr));
-        v2 = await runV2Pricing(regnr, bil.mileage || 0);
+        v2 = await runV2Pricing(regnr, originKm != null ? originKm : (bil.mileage || 0));
         ankerKilde = 'v2';
         log('Anker fra: V2 AI (Easy AI feilet)');
       }
@@ -2096,8 +2102,9 @@ async function evalCar(bil, page, cache, opts = {}) {
         try {
           var v2PayloadF = JSON.stringify({
             registration_number: regnr, id: erpId, model_year: bil.model_year,
-            mileage: bil.mileage, model_series: bil.model_series,
+            mileage: originCv.km != null ? originCv.km : bil.mileage, model_series: bil.model_series,
             make: vegData ? vegData.make : (bil.make || ''),
+            origin_cv: originCv,
             easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: easyConfidence, begrunnelse_kort: easyBegr, anker_kilde: 'finn', km_override: kmOverride }
           });
           fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2PayloadF + '\n');
@@ -2131,12 +2138,17 @@ async function evalCar(bil, page, cache, opts = {}) {
     let imageCount = 0;
     try {
       const detail = await getErpCarDetail(erpId, token);
+      originCv = originCvLib.buildOriginCv({ liste3Car: bil, detail });
+      if (bil.carInfo) originCv = originCvLib.applyCarInfoIdentity(originCv, bil.carInfo);
       var carDesc = detail?.car?.description || null;
     var sdSelf = detail?.car?.self_declaration?.comment || detail?.self_declaration?.comment || null;
-    // Dedupe: hvis identiske, vis kun én. Slipp falsy.
+    // Dedupe: hvis identiske, vis kun én. Slipp falsy. Jr: prefer origin-CV merge.
+    sdComment = originCv.seller_comment || null;
+    if (!sdComment) {
     if (carDesc && sdSelf && carDesc.trim()===sdSelf.trim()) sdComment = sdSelf;
     else if (carDesc && sdSelf) sdComment = sdSelf + "\n\nBILBESKRIVELSE: " + carDesc;
     else sdComment = sdSelf || carDesc || null;
+    }
       const bodyTypeId = detail?.car?.driveNoCarData?.body_type_id;
       if (bodyTypeId) vegData.karosseri = BODY_TYPE_MAP[bodyTypeId] || '';
       imageCount = (detail && detail.car && Array.isArray(detail.car.files)) ? detail.car.files.length : 0;
@@ -2228,8 +2240,9 @@ async function evalCar(bil, page, cache, opts = {}) {
       if (!qaOverrideUrl && !bil.testMode) { /* TESTMODE-GUARD */
         var v2Payload = JSON.stringify({
           registration_number: regnr, id: erpId, model_year: bil.model_year,
-          mileage: bil.mileage, model_series: bil.model_series,
+          mileage: originCv.km != null ? originCv.km : bil.mileage, model_series: bil.model_series,
           make: vegData ? vegData.make : (bil.make || ''),
+          origin_cv: originCv,
           easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride }
         });
         fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2Payload + '\n');

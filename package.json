@@ -1,4 +1,10 @@
 {
+	"scripts": {
+		"test": "node test-origin-cv.js && node jr/test-jr-loop.js",
+		"jr": "node jr/runner.js",
+		"jr:once": "node jr/runner.js --once",
+		"jr:chef": "node jr/chef-runner.js"
+	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.78.0",
 		"@azure/msal-node": "^5.0.6",
