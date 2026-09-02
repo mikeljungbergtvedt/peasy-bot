@@ -5,9 +5,11 @@
   "private": true,
   "main": "origin-cv.js",
   "scripts": {
-    "test": "node ../test-origin-cv.js",
+    "test": "node ../test-origin-cv.js && node test-jr-loop.js",
     "once": "node runner.js --once",
-    "start": "node runner.js"
+    "start": "node runner.js",
+    "chef": "node chef-runner.js",
+    "pull": "bash mini-pull.sh"
   },
   "engines": {
     "node": ">=18"

@@ -16,14 +16,17 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const fs = require('fs');
 const path = require('path');
 const { installErpReadonly } = require('./erp-readonly');
-const { buildOriginCv, applyCarInfoIdentity, originKmFromListe3 } = require('./origin-cv');
+const { buildOriginCv, applyCarInfoIdentity, originKmFromListe3, upperRegnr } = require('./origin-cv');
 const { dossiersForChefs } = require('./dossier');
 
 installErpReadonly();
 
 const ERP_BASE = process.env.ERP_BASE || 'https://api.biladministrasjon.no';
-const OUT_DIR = process.env.JR_DOSSIER_DIR || path.join(__dirname, 'dossiers');
+const MINI_DOSSIER_DIR = '/Users/bot/peasy-auto/jr/dossiers';
+const OUT_DIR = process.env.JR_DOSSIER_DIR
+  || (fs.existsSync('/Users/bot/peasy-auto') ? MINI_DOSSIER_DIR : path.join(__dirname, 'dossiers'));
 const ONCE = process.argv.includes('--once');
+const POLL_MS = Number(process.env.JR_POLL_MS) || 60 * 1000;
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] [jr] ${msg}`);
@@ -86,6 +89,16 @@ async function fetchCarInfoIdentity(regnr, km) {
   return json;
 }
 
+function dossierPathForCar(car) {
+  const erpId = car.id != null ? car.id : car.erpId;
+  const regnr = upperRegnr(car.registration_number || car.regnr);
+  return path.join(OUT_DIR, `${erpId}-${regnr}.json`);
+}
+
+function hasDossier(car) {
+  return fs.existsSync(dossierPathForCar(car));
+}
+
 function writeDossiers(shared, byChef) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const erpId = shared.origin_cv.erpId;
@@ -138,10 +151,14 @@ async function runOnce() {
   }
   const token = await getErpToken();
   const cars = await fetchListe3(token);
-  log(`liste 3: ${cars.length} cars (raw, no km-cache)`);
+  log(`liste 3: ${cars.length} cars (raw, no km-cache) — skriver kun nye (mangler dossier)`);
   const out = [];
   for (const car of cars) {
     try {
+      if (hasDossier(car) && !process.env.JR_REWRITE) {
+        log(`skip ${upperRegnr(car.registration_number || car.regnr)} erp=${car.id} — dossier finnes`);
+        continue;
+      }
       out.push(await processCar(token, car));
     } catch (e) {
       log(`fail ${car.registration_number || car.id}: ${e.message}`);
@@ -151,16 +168,15 @@ async function runOnce() {
 }
 
 async function main() {
-  log('Peasy Jr origin-CV runner. writes_erp=false. Pulse is not this repo.');
+  log(`Peasy Jr origin-CV loop. writes_erp=false. poll=${POLL_MS}ms. Pulse is not this repo.`);
   if (ONCE) {
     await runOnce();
     return;
   }
   await runOnce();
-  const intervalMs = Number(process.env.JR_POLL_MS) || 60 * 60 * 1000;
   setInterval(() => {
     runOnce().catch(e => log('loop: ' + e.message));
-  }, intervalMs);
+  }, POLL_MS);
 }
 
 if (require.main === module) {
@@ -170,4 +186,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { fetchListe3, processCar, runOnce, writeDossiers };
+module.exports = { fetchListe3, processCar, runOnce, writeDossiers, hasDossier, dossierPathForCar, POLL_MS, OUT_DIR };

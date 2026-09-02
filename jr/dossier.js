@@ -3,7 +3,7 @@
 const { applyCarInfoIdentity, dropOwnSold, WRITES_ERP } = require('./origin-cv');
 const { buildFinnQuery, buildFinnUrl } = require('./finn-query');
 
-const CHEFS = ['easy', 'v3', 'v3g'];
+const CHEFS = ['easy', 'v3', 'v3g', 'bot4'];
 const SCHEMA = 'peasy-jr-dossier/v1';
 
 function merkeModellFrom(originCv) {
@@ -14,7 +14,7 @@ function merkeModellFrom(originCv) {
 }
 
 /**
- * One dossier JSON for the chefs. Same origin_cv bytes for Easy / V3 / V3G.
+ * One dossier JSON for the chefs. Same origin_cv bytes for Easy / V3 / V3G / Bot4.
  * writes_erp is always false. own_sold comps are dropped, never attached.
  */
 function buildDossier({ originCv, carInfo, comps, chef } = {}) {
@@ -57,7 +57,7 @@ function dossiersForChefs(args) {
     byChef[chef] = { ...shared, chef };
   }
   const bytes = CHEFS.map(c => JSON.stringify(byChef[c].origin_cv));
-  if (!(bytes[0] === bytes[1] && bytes[1] === bytes[2])) {
+  if (new Set(bytes).size !== 1) {
     throw new Error('chefs received different origin_cv bytes');
   }
   return { shared, byChef };

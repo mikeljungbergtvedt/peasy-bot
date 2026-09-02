@@ -3,7 +3,7 @@
   "trinn": 1,
   "writes_erp": false,
   "chef": "shared",
-  "chefs": ["easy", "v3", "v3g"],
+  "chefs": ["easy", "v3", "v3g", "bot4"],
   "origin_cv": {
     "regnr": "EL54991",
     "erpId": 4202,

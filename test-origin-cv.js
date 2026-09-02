@@ -126,9 +126,8 @@ async function main() {
   assert.strictEqual(shared.finn.km, null);
   assert.strictEqual(shared.finn.kW, null);
   assert.strictEqual(shared.origin_cv.km, 11820);
-  const bytes = ['easy', 'v3', 'v3g'].map(c => JSON.stringify(byChef[c].origin_cv));
-  assert.strictEqual(bytes[0], bytes[1]);
-  assert.strictEqual(bytes[1], bytes[2]);
+  const bytes = ['easy', 'v3', 'v3g', 'bot4'].map(c => JSON.stringify(byChef[c].origin_cv));
+  assert.strictEqual(new Set(bytes).size, 1);
 
   const dossier = buildDossier({
     originCv: easy,

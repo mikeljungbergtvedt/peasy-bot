@@ -1,0 +1,165 @@
+#!/usr/bin/env node
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
+
+const { applyCarInfoIdentity } = require('./origin-cv');
+const { buildFinnUrl, assertJrFinnUrl } = require('./finn-query');
+const { buildDossier } = require('./dossier');
+const { loadForChef, readDossierFile, findDossier, preserveOriginKm } = require('./read-dossier');
+const { analogComps, finnUtprisFromDossier, assertAlwaysNumber, ASK_CAP } = require('./analog-comps');
+const { runChefOnDossier } = require('./chef-runner');
+const { POLL_MS } = require('./runner');
+
+function plistProgramArguments(file) {
+  const xml = fs.readFileSync(file, 'utf8');
+  const block = xml.split('<key>ProgramArguments</key>')[1];
+  assert.ok(block, 'ProgramArguments missing in ' + file);
+  const array = block.split('<array>')[1].split('</array>')[0];
+  return [...array.matchAll(/<string>([^<]*)<\/string>/g)].map(m => m[1]);
+}
+
+function plistValue(file, key) {
+  const xml = fs.readFileSync(file, 'utf8');
+  const re = new RegExp(`<key>${key}</key>\\s*<(string|integer)>([^<]*)</\\1>`);
+  const m = xml.match(re);
+  return m ? m[2] : null;
+}
+
+async function main() {
+  const fixture = path.join(__dirname, 'fixtures', 'el54991.shared.json');
+  const dossier = readDossierFile(fixture);
+  assert.strictEqual(dossier.writes_erp, false);
+  assert.strictEqual(dossier.origin_cv.km, 11820);
+
+  // dossier origin.km preserved against car.info / Finn km
+  const poisoned = applyCarInfoIdentity(dossier.origin_cv, {
+    result: { brand: 'Tesla', series: 'Model 3', mileage: 999999, km: 42 },
+  });
+  assert.strictEqual(poisoned.km, 11820);
+  const locked = preserveOriginKm(dossier.origin_cv, { result: { km: 1, mileage: 2 } });
+  assert.strictEqual(locked.km, 11820);
+  assert.strictEqual(locked.origin_cv ? locked.origin_cv.km : locked.km, 11820);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jr-dossier-'));
+  const named = path.join(tmp, '4202-EL54991.json');
+  fs.writeFileSync(named, JSON.stringify(dossier));
+  const hit = loadForChef({ chef: 'easy', erpId: 4202, internnr: 4202, regnr: 'EL54991', dir: tmp });
+  assert.strictEqual(hit.ok, true);
+  assert.strictEqual(hit.skipOwnSearch, true);
+  assert.strictEqual(hit.origin_cv.km, 11820);
+  assert.strictEqual(hit.writes_erp, false);
+  const v3 = loadForChef({ chef: 'v3', internnr: 4202, regnr: 'el 54991', dir: tmp });
+  const v3g = loadForChef({ chef: 'v3g', erpId: 4202, regnr: 'EL54991', dir: tmp });
+  const bot4 = loadForChef({ chef: 'bot4', erpId: 4202, regnr: 'EL54991', dir: tmp });
+  assert.strictEqual(JSON.stringify(v3.origin_cv), JSON.stringify(hit.origin_cv));
+  assert.strictEqual(JSON.stringify(v3g.origin_cv), JSON.stringify(bot4.origin_cv));
+
+  const miss = loadForChef({ chef: 'easy', erpId: 9999, regnr: 'XX00000', dir: tmp });
+  assert.strictEqual(miss.ok, false);
+  assert.strictEqual(miss.fallback, true);
+  assert.strictEqual(miss.skipOwnSearch, false);
+
+  // Finn URL still no year/km
+  const url = buildFinnUrl('Tesla', 'Model 3');
+  assert.ok(!/year_from|year_to|mileage_|engine_effect/.test(url));
+  assert.ok(!/\b(19|20)\d{2}\b/.test(new URL(url).searchParams.get('q') || ''));
+  assertJrFinnUrl(url);
+  assertJrFinnUrl(dossier.finn.url);
+  assert.strictEqual(dossier.finn.year, null);
+  assert.strictEqual(dossier.finn.km, null);
+  const rebuilt = buildDossier({ originCv: dossier.origin_cv });
+  assertJrFinnUrl(rebuilt.finn.url);
+  assert.strictEqual(rebuilt.finn.km, null);
+
+  // analog Finn-utpris always a number, never 0 comps
+  const empty = { origin_cv: { ...dossier.origin_cv }, comps: [], writes_erp: false };
+  const analogEmpty = assertAlwaysNumber(finnUtprisFromDossier(empty));
+  assert.strictEqual(typeof analogEmpty.finn_utpris, 'number');
+  assert.ok(analogEmpty.finn_utpris > 0);
+  assert.ok(analogEmpty.comps.length >= 1);
+  assert.ok(analogComps(empty).length >= 1);
+
+  const withAsk = {
+    origin_cv: { ...dossier.origin_cv, km: 11820 },
+    comps: [
+      { seller: 'Follo Auto', price: 400000 },
+      { seller: 'Peasy Oslo', price: 1 },
+    ],
+    origin: [{ is_active: true, price: 300000 }],
+  };
+  const capped = assertAlwaysNumber(finnUtprisFromDossier(withAsk));
+  assert.ok(capped.comps.every(c => !/peasy/i.test(c.seller || '')));
+  assert.ok(capped.finn_utpris <= Math.round(300000 * ASK_CAP) + 999);
+  assert.strictEqual(capped.capped, true);
+  assert.strictEqual(withAsk.origin_cv.km, 11820);
+
+  const dry = await runChefOnDossier(dossier, { forceDry: true });
+  assert.strictEqual(dry.writes_erp, false);
+  assert.strictEqual(dry.mode, 'dry-run-analog');
+  assert.strictEqual(typeof dry.finn_utpris, 'number');
+  assert.ok(dry.finn_utpris > 0);
+  assert.ok(dry.comps.length >= 1);
+  assert.strictEqual(dry.origin_km, 11820);
+
+  // launchd plist ProgramArguments valid
+  const jrPlist = path.join(__dirname, 'com.peasy.jr.plist');
+  const jrArgs = plistProgramArguments(jrPlist);
+  assert.strictEqual(jrArgs.length, 2, 'jr plist must be node + runner.js (no --once)');
+  assert.ok(jrArgs[0].endsWith('/bin/node'));
+  assert.strictEqual(jrArgs[1], '/Users/bot/peasy-auto/jr/runner.js');
+  assert.ok(!jrArgs.includes('--once'));
+  assert.strictEqual(plistValue(jrPlist, 'WorkingDirectory'), '/Users/bot/peasy-auto');
+  assert.strictEqual(plistValue(jrPlist, 'JR_DOSSIER_DIR'), '/Users/bot/peasy-auto/jr/dossiers');
+  assert.strictEqual(plistValue(jrPlist, 'JR_POLL_MS'), '60000');
+  assert.strictEqual(plistValue(jrPlist, 'WRITES_ERP'), 'false');
+  assert.ok(POLL_MS === 60000 || Number(process.env.JR_POLL_MS) > 0);
+
+  const pullPlist = path.join(__dirname, 'com.peasy.jr-pull.plist');
+  const pullArgs = plistProgramArguments(pullPlist);
+  assert.deepStrictEqual(pullArgs, [
+    '/bin/bash',
+    '/Users/bot/peasy-auto/jr/mini-pull.sh',
+  ]);
+  assert.strictEqual(plistValue(pullPlist, 'WorkingDirectory'), '/Users/bot/peasy-auto');
+  assert.strictEqual(plistValue(pullPlist, 'StartInterval'), '60');
+
+  // copy script does not copy peasy-auto.js and does not delete backups
+  const srcRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'jr-src-'));
+  const destParent = fs.mkdtempSync(path.join(os.tmpdir(), 'jr-dest-'));
+  const dest = path.join(destParent, 'jr');
+  fs.mkdirSync(path.join(srcRoot, 'jr'), { recursive: true });
+  fs.writeFileSync(path.join(srcRoot, 'jr', 'hello.js'), 'module.exports = 1;\n');
+  fs.writeFileSync(path.join(srcRoot, 'peasy-auto.js'), 'EASY_V7_ONLY_ON_MINI\n');
+  fs.writeFileSync(path.join(srcRoot, 'jr', 'peasy-auto.js'), 'SHOULD_NOT_COPY\n');
+  const miniEasy = path.join(destParent, 'peasy-auto.js');
+  fs.writeFileSync(miniEasy, 'MINI_EASY_V7_BACKUP_OK\n');
+  fs.writeFileSync(path.join(destParent, 'peasy-auto.js.bak'), 'KEEP_BACKUP\n');
+  execFileSync('/bin/bash', [path.join(__dirname, 'mini-pull.sh'), '--copy-only'], {
+    env: {
+      ...process.env,
+      JR_WORKDIR: destParent,
+      JR_PULL_SRC: srcRoot,
+      JR_PULL_DEST: dest,
+      JR_PULL_LOG: path.join(destParent, 'jr-pull.log'),
+    },
+  });
+  assert.ok(fs.existsSync(path.join(dest, 'hello.js')), 'jr/ files must be copied');
+  assert.ok(!fs.existsSync(path.join(dest, 'peasy-auto.js')), 'must not copy peasy-auto.js');
+  assert.strictEqual(fs.readFileSync(miniEasy, 'utf8'), 'MINI_EASY_V7_BACKUP_OK\n');
+  assert.strictEqual(fs.readFileSync(path.join(destParent, 'peasy-auto.js.bak'), 'utf8'), 'KEEP_BACKUP\n');
+
+  const found = findDossier({ erpId: 4202, regnr: 'EL54991', dir: tmp });
+  assert.strictEqual(found.origin_cv.km, 11820);
+
+  console.log('ok — jr loop: origin.km 11820, Finn uten år/km, plist OK, pull kopierer kun jr/');
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});

@@ -15,6 +15,8 @@
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>StandardErrorPath</key>
   <string>/Users/bot/peasy-auto/logs.nosync/jr.err.log</string>
   <key>StandardOutPath</key>
@@ -24,7 +26,11 @@
     <key>PATH</key>
     <string>/Users/bot/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>JR_DOSSIER_DIR</key>
-    <string>/Users/bot/peasy-jr/dossiers</string>
+    <string>/Users/bot/peasy-auto/jr/dossiers</string>
+    <key>JR_POLL_MS</key>
+    <string>60000</string>
+    <key>WRITES_ERP</key>
+    <string>false</string>
   </dict>
 </dict>
 </plist>
