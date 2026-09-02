@@ -143,6 +143,19 @@ async function main() {
   });
   assert.strictEqual(JSON.stringify(fetched), JSON.stringify(easy));
 
+  const fromRoot = require('./origin-cv');
+  const fromJr = require('./jr/origin-cv');
+  assert.strictEqual(
+    JSON.stringify(fromRoot.buildOriginCv({ liste3Car, detail })),
+    JSON.stringify(fromJr.buildOriginCv({ liste3Car, detail }))
+  );
+  assert.strictEqual(fromRoot.mergeSellerComment({
+    car: { description: 'kun drive-beskrivelse' },
+  }), 'kun drive-beskrivelse');
+  assert.strictEqual(fromRoot.mergeSellerComment({
+    car: { self_declaration: { comment: 'kun peasy sd' } },
+  }), 'kun peasy sd');
+
   // ERP write guard
   const blocked = [];
   const fakeFetch = async (url, opts = {}) => {

@@ -1,0 +1,45 @@
+{
+  "schema": "peasy-jr-dossier/v1",
+  "trinn": 1,
+  "writes_erp": false,
+  "chef": "shared",
+  "chefs": ["easy", "v3", "v3g"],
+  "origin_cv": {
+    "regnr": "EL54991",
+    "erpId": 4202,
+    "source": "peasy",
+    "km": 11820,
+    "seller_comment": "pent holdt\n\nBILBESKRIVELSE: nyrekk",
+    "has_sd_comment": true,
+    "has_description": true,
+    "kjorbar": "usikker",
+    "signaler": false,
+    "writes_erp": false,
+    "model_year": 2021,
+    "model_series": "Model 3",
+    "identity": {
+      "source": "car.info",
+      "make": "Tesla",
+      "model": "Model 3",
+      "year": 2021
+    },
+    "make": "Tesla",
+    "model": "Model 3"
+  },
+  "identity": {
+    "source": "car.info",
+    "make": "Tesla",
+    "model": "Model 3",
+    "year": 2021
+  },
+  "finn": {
+    "q": "Tesla Model 3",
+    "url": "https://www.finn.no/mobility/search/car?q=Tesla+Model+3&registration_class=1&sales_form=1",
+    "year": null,
+    "km": null,
+    "kW": null
+  },
+  "own_sold": false,
+  "own_sold_excluded": true,
+  "comps": []
+}
