@@ -181,6 +181,9 @@ function mapChefComps(source) {
   for (const ad of raw) {
     const price = extractPrice(ad);
     if (!price) continue;
+    const seller = [ad.seller, ad.company, ad.dealer, ad.seller_name]
+      .map(v => (v == null ? '' : String(v).trim()))
+      .find(Boolean) || null;
     const mapped = {
       price,
       km: extractKm(ad),
@@ -188,6 +191,7 @@ function mapChefComps(source) {
       title: extractTitle(ad),
       year: extractYear(ad),
     };
+    if (seller) mapped.seller = seller;
     const key = mapped.url || `${mapped.price}|${mapped.km}|${mapped.title}|${mapped.year}`;
     if (seen.has(key)) continue;
     seen.add(key);

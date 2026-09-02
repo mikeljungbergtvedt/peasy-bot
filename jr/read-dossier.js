@@ -169,7 +169,13 @@ function loadForChef({ chef, erpId, internnr, regnr, dir } = {}) {
     return result;
   }
   const origin_cv = preserveOriginKm(dossier.origin_cv, null);
-  const pool = mapChefComps(dossier);
+  const pool = mapChefComps(dossier).map(c => ({
+    price: c.price,
+    km: c.km ?? null,
+    url: c.url ?? null,
+    title: c.title ?? null,
+    year: c.year ?? null,
+  }));
   const skipOwnSearch = pool.length >= 1;
   if (skipOwnSearch) {
     log(
