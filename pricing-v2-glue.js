@@ -11,6 +11,7 @@
 
 const path = require('path');
 const { pathToFileURL } = require('url');
+const originCvLib = require('./origin-cv');
 
 const V2_DIR = process.env.PEASY_V2_DIR || '/Users/bot/peasy-pricing-v2';
 
@@ -163,7 +164,7 @@ async function collectOnly(regnr, km) {
   console.log(`[v2-glue] ${regnr} km=${kmNum} | car.info ok=${carOk} | forhandler=${company.arr.length} | privat=${priv.arr.length} | val-nokler=[${Object.keys(val).join(',')}]`);
   const allClassifieds = [...company.arr.map(c => formatClassified(c, 'forhandler')), ...priv.arr.map(c => formatClassified(c, 'privat'))];
   const { origin, comps: rawComps } = splitOriginAndComps(allClassifieds, regnr);
-  const deduped = dedupeComps(rawComps);
+  const deduped = originCvLib.dropOwnSold(dedupeComps(rawComps));
   const veg = (data.sources && data.sources.vegvesen && data.sources.vegvesen.data) || {};
   const make = ci.brand || veg.make || '';
   const elbilData = (data.sources && data.sources.elbilradar && data.sources.elbilradar.data) || null;

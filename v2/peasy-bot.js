@@ -23,6 +23,9 @@ import { calculatePricing, identifySegment } from './pricing-formula.js';
 import { buildEvalCard } from './telegram-v2.js';
 import { sendTelegram } from './telegram-bot.js';
 import { checkBrregForRegnr } from './brreg.js';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const originCvLib = require('../jr/origin-cv.js');
 
 const VERSION = 'peasy-bot v1.16';
 const CACHE_FILE = '/Users/bot/peasy-pricing-v2/peasy-cache.json';
@@ -37,23 +40,28 @@ function saveCache(c) { fs.writeFileSync(CACHE_FILE, JSON.stringify(c, null, 2))
 async function evalCar(bil, token) {
   const regnr = String(bil.registration_number || '').trim().toUpperCase();
   const erpId = bil.id;
-  let km = bil.mileage || 0;
+  let originCv = originCvLib.buildOriginCv({ liste3Car: bil });
+  let km = originCvLib.lockedKm(originCv, null);
   let kmOverride = null;
-  log('=== Evaluerer ' + regnr + ' (erpId=' + erpId + ') ===');
+  log('=== Evaluerer ' + regnr + ' (erpId=' + erpId + ') origin.km=' + km + ' ===');
   try {
     // 1. Hent full bil-detalj fra ERP (selvdeklarasjon, beskrivelse, bilder, body_type)
     let detail = null;
     try { detail = await maybeGetErpDetail(bil, erpId, token); } catch (e) { logErr('getErpCarDetail', e); }
-    let sdComment = null;
+    originCv = originCvLib.buildOriginCv({ liste3Car: bil, detail });
+    km = originCvLib.lockedKm(originCv, km);
+    let sdComment = originCv.seller_comment || null;
     let imageCount = 0;
     let bodyTypeId = null;
     if (detail) {
       const car = detail.car || detail;
+      if (!sdComment) {
       const sdSelf = car?.self_declaration?.comment || detail?.self_declaration?.comment || null;
       const carDesc = car?.description || null;
       if (carDesc && sdSelf && carDesc.trim() === sdSelf.trim()) sdComment = sdSelf;
       else if (carDesc && sdSelf) sdComment = sdSelf + '\n\nBILBESKRIVELSE: ' + carDesc;
       else sdComment = sdSelf || carDesc || null;
+      }
       imageCount = (car && Array.isArray(car.files)) ? car.files.length : 0;
       bodyTypeId = car?.driveNoCarData?.body_type_id || null;
     }
@@ -63,27 +71,19 @@ async function evalCar(bil, token) {
     // 2. v2 pipeline (car.info comps + Sonnet anker + Easy-formel pricing)
     const data = await collectAllData(regnr, km);
     const ci = data?.sources?.car_info?.result || {};
-    // v1.13: km-override fra EU-kontroll — EU-km autoritativ (Statens vegvesen)
+    originCv = originCvLib.applyCarInfoIdentity(originCv, ci);
+    km = originCvLib.lockedKm(originCv, km);
+    // car.info plate identity may enrich make/model — never overwrite origin.km
     try {
       const _insp = ((ci && ci.history) || []).filter(h => h && h.type === 'inspection');
       const _euMaxKm = Math.max(0, ..._insp.map(e => Number(e.km) || 0));
       if (_euMaxKm > 0 && km > 0 && _euMaxKm > km) {
-        log('[km-override] ' + regnr + ': EU ' + _euMaxKm + ' > oppgitt ' + km + ' — bruker EU-km');
-        kmOverride = { from: km, to: _euMaxKm, reason: 'eu' };
-        km = _euMaxKm;
-        bil.mileage = _euMaxKm;
+        log('[km-override] ' + regnr + ': EU ' + _euMaxKm + ' > origin.km ' + km + ' — flag only, origin.km stays');
+        kmOverride = { from: km, to: _euMaxKm, reason: 'eu', applied: false };
       }
-      // v1.14: km-typo-fix — hvis oppgitt > 2x EU, prøv å fjerne siste siffer
       if (_euMaxKm > 0 && km > _euMaxKm * 2) {
-        const _candidate = Math.floor(km / 10);
-        if (_candidate >= _euMaxKm && _candidate <= _euMaxKm * 1.5) {
-          log('[km-typo-fix] ' + regnr + ': oppgitt ' + km + ' → ' + _candidate + ' (fjernet siste siffer, EU=' + _euMaxKm + ')');
-          kmOverride = { from: km, to: _candidate, reason: 'typo' };
-          km = _candidate;
-          bil.mileage = _candidate;
-        } else {
-          log('[km-typo-mistanke] ' + regnr + ': oppgitt ' + km + ' >> EU ' + _euMaxKm + ' — kunne ikke auto-rette');
-        }
+        log('[km-typo-mistanke] ' + regnr + ': origin.km ' + km + ' >> EU ' + _euMaxKm + ' — origin.km locked');
+        kmOverride = { from: km, to: km, reason: 'typo_uklart', eu: _euMaxKm, applied: false };
       }
     } catch (e) {}
     const companyRaw = ci.valuation?.company_valuation?.classifieds || [];
@@ -93,7 +93,7 @@ async function evalCar(bil, token) {
       ...privateRaw.map(c => formatClassified(c, 'privat'))
     ];
     const { origin, comps: rawComps } = splitOriginAndComps(all, regnr);
-    const comps = dedupeComps(rawComps);
+    const comps = originCvLib.dropOwnSold(dedupeComps(rawComps));
     if (comps.length === 0) {
       log('SKIP: ingen comps for ' + regnr);
       return;

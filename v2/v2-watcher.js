@@ -10,7 +10,11 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { createRequire } from 'module';
 import { evalRegnr } from './v2-eval.js';
+
+const require = createRequire(import.meta.url);
+const originCvLib = require('../jr/origin-cv.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QUEUE_FILE = process.env.V2_QUEUE_FILE || '/Users/bot/peasy-pricing-v2-queue.txt';
@@ -53,7 +57,8 @@ async function processLine(line) {
 
   // Aksepter BAADE Grok-stil (registration_number, mileage) OG gammel v2-stil (regnr, km)
   const regnr = job.registration_number || job.regnr;
-  const km    = job.mileage             ?? job.km;
+  const originCv = job.origin_cv || job.originCv || null;
+  const km    = originCvLib.lockedKm(originCv, job.mileage ?? job.km);
   const erpId = job.id                  ?? job.erpId;
   // NY: hent easy_eval (Easys benchmark-tall)
   const easyEval = job.easy_eval || null;
@@ -94,7 +99,7 @@ async function processLine(line) {
   } catch(e) { console.error(`[${ts()}] Dedupe-sjekk feilet, fortsetter: ${e.message}`); }
   console.log(`[${ts()}] Starter v2-eval for ${regnr} (${km} km, erpId=${erpId || '?'})${easyEval ? ' [easy_eval finnes]' : ''}`);
   try {
-    const run = await evalRegnr(regnr, Number(km), { erpId, easyEval });
+    const run = await evalRegnr(regnr, Number(km), { erpId, easyEval, originCv });
     const anker = run?.steps?.anchor?.anker_beregning?.anker;
     const dLav  = run?.steps?.pricing?.dLav;
     const dHoy  = run?.steps?.pricing?.dHoy;

@@ -1,0 +1,15 @@
+{
+  "name": "peasy-jr",
+  "version": "1.0.0",
+  "description": "Peasy Jr shared origin-CV (trinn 1). writes_erp false. Mini runner; Cursor owns repo; Pulse is separate github.io.",
+  "private": true,
+  "main": "origin-cv.js",
+  "scripts": {
+    "test": "node ../test-origin-cv.js",
+    "once": "node runner.js --once",
+    "start": "node runner.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -8,12 +8,16 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync, writeFileSync } from 'fs';
 
+import { createRequire } from 'module';
 import { collectAllData }     from './data-collector.js';
 import { chooseAnchor }       from './ai-anchor.js';
 import { calculatePricing }   from './pricing-formula.js';
 import { sendV2Eval, buildEvalCard } from './telegram-v2.js';
 import { recordMeasurement }  from './v2-measurements.js';
 import { pushToPulse }       from './v2-push-to-pulse.js';
+
+const require = createRequire(import.meta.url);
+const originCvLib = require('../jr/origin-cv.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = path.join(__dirname, 'logs');
@@ -70,9 +74,13 @@ export function dedupeComps(comps) {
 }
 
 export async function evalRegnr(regnr, km, opts = {}) {
+  const originCv = opts.originCv || opts.origin_cv || null;
+  const lockedKm = originCvLib.lockedKm(originCv, km);
   const run = {
-    regnr, km,
+    regnr,
+    km: lockedKm,
     erpId: opts.erpId ?? null,
+    origin_cv: originCv,
     started_at: new Date().toISOString(),
     steps: {},
     errors: [],
@@ -87,7 +95,7 @@ export async function evalRegnr(regnr, km, opts = {}) {
   }
 
   try {
-    run.steps.data = await collectAllData(regnr, km);
+    run.steps.data = await collectAllData(regnr, lockedKm);
     run.errors.push(...(run.steps.data.errors || []));
   } catch (e) {
     run.errors.push(`data: ${e.message}`);
@@ -95,6 +103,10 @@ export async function evalRegnr(regnr, km, opts = {}) {
   }
 
   const ci = run.steps.data.sources?.car_info?.result || {};
+  if (originCv) {
+    run.origin_cv = originCvLib.applyCarInfoIdentity(originCv, ci);
+    run.km = originCvLib.lockedKm(run.origin_cv, lockedKm);
+  }
   const companyRaw = ci.valuation?.company_classifieds || [];
   const privateRaw = ci.valuation?.private_classifieds || [];
 
@@ -104,7 +116,7 @@ export async function evalRegnr(regnr, km, opts = {}) {
   ];
 
   const { origin, comps: rawComps } = splitOriginAndComps(allClassifieds, regnr);
-  const comps = dedupeComps(rawComps);
+  const comps = originCvLib.dropOwnSold(dedupeComps(rawComps));
   // V1.1 PATCH: aktivt server-side Finn-regnr-sjekk (uavhengig av car.info classifieds)
   try {
     const finnHit = await fetchOriginPaaFinn(regnr);
@@ -162,7 +174,7 @@ export async function evalRegnr(regnr, km, opts = {}) {
 
   run.steps.pricing = calculatePricing({
     anchorPrice,
-    km: Number(km),
+    km: Number(lockedKm),
     modelYear: Number(modelYear),
     lowestComp,
   });
