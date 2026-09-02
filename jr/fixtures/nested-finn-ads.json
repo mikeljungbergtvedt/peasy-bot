@@ -1,0 +1,68 @@
+{
+  "schema": "peasy-jr-dossier/v1",
+  "trinn": 1,
+  "writes_erp": false,
+  "chef": "shared",
+  "chefs": ["easy", "v3", "v3g", "bot4"],
+  "origin_cv": {
+    "regnr": "EL54991",
+    "erpId": 4202,
+    "source": "peasy",
+    "km": 11820,
+    "writes_erp": false,
+    "model_year": 2021,
+    "model_series": "Model 3",
+    "identity": {
+      "source": "car.info",
+      "make": "Tesla",
+      "model": "Model 3",
+      "year": 2021
+    },
+    "make": "Tesla",
+    "model": "Model 3"
+  },
+  "finn": {
+    "q": "Tesla Model 3",
+    "url": "https://www.finn.no/mobility/search/car?q=Tesla+Model+3&registration_class=1&sales_form=1",
+    "year": null,
+    "km": null,
+    "kW": null,
+    "ads": [
+      {
+        "heading": "Tesla Model 3 Long Range",
+        "price": { "amount": 349000 },
+        "mileage": 42000,
+        "year": 2021,
+        "canonical_url": "https://www.finn.no/mobility/item/111111111",
+        "id": "111111111"
+      },
+      {
+        "seller": "Peasy Oslo",
+        "soldPrice": 199000,
+        "heading": "own sold — drop",
+        "finnkode": 999999999
+      }
+    ],
+    "listings": [
+      {
+        "title": "Tesla Model 3",
+        "soldPrice": 335000,
+        "asking_price": 349000,
+        "kilometerstand": 38000,
+        "yearModel": 2020,
+        "finnkode": 222222222
+      }
+    ],
+    "hits": [
+      {
+        "heading": "Model 3 Standard",
+        "asking_price": 360000,
+        "mileage_km": 50000,
+        "model_year": 2021
+      }
+    ]
+  },
+  "own_sold": false,
+  "own_sold_excluded": true,
+  "comps": []
+}

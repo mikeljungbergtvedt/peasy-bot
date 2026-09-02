@@ -6,16 +6,19 @@
  * Mini path: /Users/bot/peasy-auto/jr/dossiers/{erpId}-{REGNR}.json
  * Override with JR_DOSSIER_DIR.
  *
- * When a dossier exists, chefs MUST use it instead of their own
- * Finn / car.info search. Missing dossier → fallback to old search + log.
+ * hit.ok=true when a dossier exists. skipOwnSearch=true ONLY if mapped
+ * comps.length>=1. Dossier with empty pool → skipOwnSearch=false, still
+ * return origin_cv (locked ERP km); chefs MUST run their own Finn search.
+ * Missing dossier → fallback to old search + log.
  * origin.km is never overwritten. own_sold comps are dropped.
  * writes_erp is always false.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { applyCarInfoIdentity, dropOwnSold, lockedKm, upperRegnr, WRITES_ERP } = require('./origin-cv');
+const { applyCarInfoIdentity, upperRegnr, WRITES_ERP } = require('./origin-cv');
 const { assertJrFinnUrl } = require('./finn-query');
+const { mapChefComps } = require('./analog-comps');
 
 const CHEFS = ['easy', 'v3', 'v3g', 'bot4'];
 const MINI_DOSSIER_DIR = '/Users/bot/peasy-auto/jr/dossiers';
@@ -93,7 +96,11 @@ function sanitizeDossier(raw, filePath) {
   }
   dossier.own_sold = false;
   dossier.own_sold_excluded = true;
-  dossier.comps = dropOwnSold(dossier.comps || []);
+  const mapped = mapChefComps(dossier);
+  dossier.comps = mapped;
+  if (dossier.finn && typeof dossier.finn === 'object' && mapped.length) {
+    dossier.finn.ads = mapped;
+  }
   dossier._path = filePath || null;
   if (dossier.finn && dossier.finn.url) {
     assertJrFinnUrl(dossier.finn.url);
@@ -138,7 +145,7 @@ function preserveOriginKm(originCv, carInfo) {
 
 /**
  * Official chef API. Easy/V3/V3G/Bot4 call this first.
- * skipOwnSearch=true → do not build Finn/car.info search.
+ * hit.ok=true if dossier exists. skipOwnSearch=true ONLY when pool.length>=1.
  */
 function loadForChef({ chef, erpId, internnr, regnr, dir } = {}) {
   const name = String(chef || '').toLowerCase() || 'chef';
@@ -154,6 +161,7 @@ function loadForChef({ chef, erpId, internnr, regnr, dir } = {}) {
       origin_cv: null,
       dossier: null,
       comps: [],
+      pool: [],
       finn: null,
       path: null,
     };
@@ -161,20 +169,31 @@ function loadForChef({ chef, erpId, internnr, regnr, dir } = {}) {
     return result;
   }
   const origin_cv = preserveOriginKm(dossier.origin_cv, null);
-  log(
-    `${name} leser Jr-dossier ${dossier._path} km=${origin_cv && origin_cv.km} ` +
-    `writes_erp=${WRITES_ERP} — hopper over egen Finn/car.info-søk`
-  );
+  const pool = mapChefComps(dossier);
+  const skipOwnSearch = pool.length >= 1;
+  if (skipOwnSearch) {
+    log(
+      `${name} leser Jr-dossier ${dossier._path} km=${origin_cv && origin_cv.km} ` +
+      `n_comps=${pool.length} writes_erp=${WRITES_ERP} — skipOwnSearch=true`
+    );
+  } else {
+    log(
+      `${name} leser Jr-dossier ${dossier._path} km=${origin_cv && origin_cv.km} ` +
+      `n_comps=0 writes_erp=${WRITES_ERP} — mapped comps tom (Mini-pool tom). ` +
+      `skipOwnSearch=false — sjef MÅ kjøre eget Finn-søk. origin.km låst.`
+    );
+  }
   return {
     ok: true,
     fallback: false,
-    skipOwnSearch: true,
+    skipOwnSearch,
     chef: name,
-    reason: 'dossier_hit',
+    reason: skipOwnSearch ? 'dossier_hit' : 'dossier_hit_empty_pool',
     writes_erp: WRITES_ERP,
     origin_cv,
     dossier,
-    comps: dropOwnSold(dossier.comps || []),
+    comps: pool,
+    pool,
     finn: dossier.finn || null,
     path: dossier._path,
   };
@@ -201,6 +220,7 @@ module.exports = {
   preserveOriginKm,
   freezeOriginKm,
   forChef,
+  mapChefComps,
   easy: forChef('easy'),
   v3: forChef('v3'),
   v3g: forChef('v3g'),

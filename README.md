@@ -22,7 +22,7 @@ Easy V7 (`peasy-auto.js`) lives **only on Mini**. Mini-pull copies **only** `jr/
 - **Finn** `q = merke + modell`. No year, no km, no kW — not in `q`, not as filters.
 - **No `own_sold`** — Peasy / Autoringen / Drive sold comps are dropped.
 - **Dossier JSON** — one origin-CV, same bytes for Easy, V3, V3G and Bot4.
-- **Sjefer leser dossier** — `jr/read-dossier.js` (`{erpId}-{REGNR}.json`). Mangler dossier → gammel søk + logg.
+- **Sjefer leser dossier** — `jr/read-dossier.js` (`{erpId}-{REGNR}.json`). `hit.ok` ≠ hopp over Finn; `skipOwnSearch` er true bare når mapped comps ≥ 1. Mangler dossier eller tom pool → eget Finn-søk + logg.
 - **Finn-utpris** — `jr/chef-runner.js` (Claude+Grok eller analog dry-run). Alltid et tall. Cap ask×0.95.
 
 ## Mini install

@@ -28,10 +28,16 @@ Sjefer (Easy V7 bor **bare på Mini**, ikke i denne PR-en):
 ```js
 const jr = require('/Users/bot/peasy-auto/jr/read-dossier');
 const hit = jr.loadForChef({ chef: 'easy', internnr: erpId, regnr });
-if (hit.ok) {
-  // bruk hit.origin_cv + hit.finn + hit.comps — ikke eget Finn/car.info-søk
-} // else: gammel søk, allerede logget
+if (hit.ok && hit.skipOwnSearch) {
+  // bruk hit.origin_cv + hit.pool / hit.comps (flat {price, km, url, title, year})
+} else if (hit.ok) {
+  // dossier finnes, origin.km låst — men mapped comps tom: KJØR eget Finn-søk
+} else {
+  // gammel søk, allerede logget
+}
 ```
+
+`hit.ok` betyr bare at dossier-filen finnes. **Sjefer skal ikke hoppe over eget Finn-søk når `skipOwnSearch` er false.** 2. sep 2026 (~15:15 Oslo) hoppet Mini-hook på `hit.ok` og leste `dossier.comps` / `dossier.finn.ads` med bare `price|ask|finn_price` og `km|mileage`. Jr lagrer ofte `price.amount`, `soldPrice`, `asking_price`, `finnkode` — pool ble 0, Bot4 sa «ingen markedsevidens» og V3G fikk `finn_utpris` null. `loadForChef` mapper nå til flat `{price, km, url, title, year}` med `price>0`; `skipOwnSearch=true` bare når `pool.length>=1`. Tom pool: `ok=true`, `skipOwnSearch=false`, `origin_cv` med låst ERP-km. Chef-runner/analog-comps gir aldri 0 comps som ferdig svar.
 
 Finn-utpris:
 

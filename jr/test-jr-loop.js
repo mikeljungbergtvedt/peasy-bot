@@ -11,7 +11,14 @@ const { applyCarInfoIdentity } = require('./origin-cv');
 const { buildFinnUrl, assertJrFinnUrl } = require('./finn-query');
 const { buildDossier } = require('./dossier');
 const { loadForChef, readDossierFile, findDossier, preserveOriginKm } = require('./read-dossier');
-const { analogComps, finnUtprisFromDossier, assertAlwaysNumber, ASK_CAP } = require('./analog-comps');
+const {
+  analogComps,
+  finnUtprisFromDossier,
+  assertAlwaysNumber,
+  ASK_CAP,
+  mapChefComps,
+  miniHookPool,
+} = require('./analog-comps');
 const { runChefOnDossier } = require('./chef-runner');
 const { POLL_MS } = require('./runner');
 
@@ -50,7 +57,8 @@ async function main() {
   fs.writeFileSync(named, JSON.stringify(dossier));
   const hit = loadForChef({ chef: 'easy', erpId: 4202, internnr: 4202, regnr: 'EL54991', dir: tmp });
   assert.strictEqual(hit.ok, true);
-  assert.strictEqual(hit.skipOwnSearch, true);
+  assert.strictEqual(hit.skipOwnSearch, false, 'empty mapped comps must not skip own Finn');
+  assert.ok(Array.isArray(hit.pool) && hit.pool.length === 0);
   assert.strictEqual(hit.origin_cv.km, 11820);
   assert.strictEqual(hit.writes_erp, false);
   const v3 = loadForChef({ chef: 'v3', internnr: 4202, regnr: 'el 54991', dir: tmp });
@@ -156,7 +164,59 @@ async function main() {
   const found = findDossier({ erpId: 4202, regnr: 'EL54991', dir: tmp });
   assert.strictEqual(found.origin_cv.km, 11820);
 
-  console.log('ok — jr loop: origin.km 11820, Finn uten år/km, plist OK, pull kopierer kun jr/');
+  // Nested Finn ads without top-level .price (2 Sep Mini empty-pool bug)
+  const nestedPath = path.join(__dirname, 'fixtures', 'nested-finn-ads.json');
+  const nestedRaw = JSON.parse(fs.readFileSync(nestedPath, 'utf8'));
+  assert.strictEqual(miniHookPool(nestedRaw).length, 0, 'hunch: Mini price|ask|finn_price misses nested ads');
+  const mappedNested = mapChefComps(nestedRaw);
+  assert.ok(mappedNested.length >= 1, 'mapper must flatten nested Finn ads');
+  assert.ok(mappedNested.every(c => c.price > 0 && 'km' in c && 'url' in c && 'title' in c && 'year' in c));
+  assert.ok(!mappedNested.some(c => /own sold/i.test(c.title || '')));
+
+  const nestedTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jr-nested-'));
+  const nestedNamed = path.join(nestedTmp, '4202-EL54991.json');
+  fs.writeFileSync(nestedNamed, JSON.stringify(nestedRaw));
+  const nestedHit = loadForChef({ chef: 'bot4', erpId: 4202, regnr: 'EL54991', dir: nestedTmp });
+  assert.strictEqual(nestedHit.ok, true);
+  assert.strictEqual(nestedHit.writes_erp, false);
+  assert.strictEqual(nestedHit.origin_cv.km, 11820);
+  const n = (nestedHit.pool || nestedHit.comps || []).length;
+  assert.ok(n >= 1 || nestedHit.skipOwnSearch === false, 'n>=1 OR skipOwnSearch false');
+  assert.strictEqual(nestedHit.skipOwnSearch, n >= 1);
+  assert.ok(n >= 1, 'nested fixture must map to a usable pool');
+  assert.ok(nestedHit.comps.every(c => c.price > 0));
+  assert.deepStrictEqual(nestedHit.pool, nestedHit.comps);
+
+  const analogNested = assertAlwaysNumber(finnUtprisFromDossier(nestedRaw));
+  assert.ok(analogNested.comps.length >= 1);
+  assert.ok(analogNested.comps.some(c => c.price === 349000 || c.price === 335000 || c.price === 360000));
+  assert.strictEqual(typeof analogNested.finn_utpris, 'number');
+  assert.ok(analogNested.finn_utpris > 0);
+
+  const rebuiltNested = buildDossier({
+    originCv: nestedRaw.origin_cv,
+    comps: nestedRaw.finn.ads,
+    finn: { ads: nestedRaw.finn.listings },
+  });
+  assert.ok(rebuiltNested.comps.length >= 1);
+  assert.ok(rebuiltNested.comps.every(c => typeof c.price === 'number' && c.price > 0));
+  assert.strictEqual(rebuiltNested.origin_cv.km, 11820);
+
+  const emptyNested = {
+    origin_cv: { ...nestedRaw.origin_cv },
+    comps: [],
+    finn: { ads: [{ heading: 'ingen pris', mileage: 10000, finnkode: 123 }] },
+    writes_erp: false,
+  };
+  const emptyHitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jr-empty-ads-'));
+  fs.writeFileSync(path.join(emptyHitDir, '4202-EL54991.json'), JSON.stringify(emptyNested));
+  const emptyAdsHit = loadForChef({ chef: 'v3g', erpId: 4202, regnr: 'EL54991', dir: emptyHitDir });
+  assert.strictEqual(emptyAdsHit.ok, true);
+  assert.strictEqual(emptyAdsHit.skipOwnSearch, false);
+  assert.strictEqual(emptyAdsHit.origin_cv.km, 11820);
+  assert.ok(analogComps(emptyNested).length >= 1, 'chef-runner never finishes with 0 comps');
+
+  console.log('ok — jr loop: origin.km 11820, nested Finn map, skipOwnSearch, pull kopierer kun jr/');
 }
 
 main().catch(err => {

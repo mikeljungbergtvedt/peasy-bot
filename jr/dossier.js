@@ -1,7 +1,8 @@
 'use strict';
 
-const { applyCarInfoIdentity, dropOwnSold, WRITES_ERP } = require('./origin-cv');
+const { applyCarInfoIdentity, WRITES_ERP } = require('./origin-cv');
 const { buildFinnQuery, buildFinnUrl } = require('./finn-query');
+const { mapChefComps } = require('./analog-comps');
 
 const CHEFS = ['easy', 'v3', 'v3g', 'bot4'];
 const SCHEMA = 'peasy-jr-dossier/v1';
@@ -17,7 +18,7 @@ function merkeModellFrom(originCv) {
  * One dossier JSON for the chefs. Same origin_cv bytes for Easy / V3 / V3G / Bot4.
  * writes_erp is always false. own_sold comps are dropped, never attached.
  */
-function buildDossier({ originCv, carInfo, comps, chef } = {}) {
+function buildDossier({ originCv, carInfo, comps, finn, chef } = {}) {
   if (!originCv) throw new Error('buildDossier: originCv required');
   const locked = applyCarInfoIdentity(originCv, carInfo || null);
   if (locked.km !== originCv.km) {
@@ -26,7 +27,10 @@ function buildDossier({ originCv, carInfo, comps, chef } = {}) {
   const { merke, modell } = merkeModellFrom(locked);
   const q = buildFinnQuery(merke, modell);
   const url = buildFinnUrl(merke, modell);
-  const cleanComps = dropOwnSold(comps || []);
+  const mapped = mapChefComps({
+    comps: comps || [],
+    finn: finn && typeof finn === 'object' ? finn : null,
+  });
 
   return {
     schema: SCHEMA,
@@ -42,10 +46,11 @@ function buildDossier({ originCv, carInfo, comps, chef } = {}) {
       year: null,
       km: null,
       kW: null,
+      ...(mapped.length ? { ads: mapped } : {}),
     },
     own_sold: false,
     own_sold_excluded: true,
-    comps: cleanComps,
+    comps: mapped,
     built_at: new Date().toISOString(),
   };
 }
