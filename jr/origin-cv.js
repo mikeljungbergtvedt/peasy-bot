@@ -3,9 +3,13 @@
 /**
  * Peasy Jr — shared origin-CV (trinn 1).
  *
- * One function / one JSON for Easy, V3 and V3G. Same bytes for all chefs.
+ * One function / one JSON for Easy, V3, V3G and Bot4. Same bytes for all chefs.
  * km is locked from ERP liste 3 nested drive_no_car_data.mileage only.
- * car.info plate identity may enrich make/model — it never writes origin.km.
+ * model_year is locked from ERP liste 3 nested drive_no_car_data.model_year
+ * (førstegangsregistrering / årsmodell). Never Vegvesen year/aar, never
+ * car.info identity.year, never chef-ident.
+ * car.info plate identity may enrich make/model — it never writes origin.km
+ * or origin.model_year.
  */
 
 const WRITES_ERP = false;
@@ -35,6 +39,43 @@ function originKmFromListe3(car) {
   const nested = pickNestedCarData(car);
   if (!nested) return null;
   return asPositiveNumber(nested.mileage ?? nested.km ?? null);
+}
+
+/**
+ * Origin model_year from ERP liste 3 only.
+ * Locked field: drive_no_car_data.model_year (ERP førstegang).
+ * Never top-level list-mapping model_year, never Vegvesen, never car.info.
+ */
+function originModelYearFromListe3(car) {
+  const nested = pickNestedCarData(car);
+  if (!nested) return null;
+  return asPositiveNumber(nested.model_year ?? nested.modelYear ?? null);
+}
+
+function stripCompetingYear(identity) {
+  if (!identity || typeof identity !== 'object') return identity || null;
+  const next = { ...identity };
+  delete next.year;
+  delete next.aar;
+  delete next.model_year;
+  return next;
+}
+
+/**
+ * origin_cv.model_year is the only year chefs may read.
+ * Drop Vegvesen year/aar and car.info identity.year so they cannot compete.
+ */
+function lockOriginCvYears(originCv, lockedYear) {
+  if (!originCv || typeof originCv !== 'object') return originCv;
+  const year = asPositiveNumber(lockedYear);
+  if (year) originCv.model_year = year;
+  else delete originCv.model_year;
+  delete originCv.year;
+  delete originCv.aar;
+  if (originCv.identity && typeof originCv.identity === 'object') {
+    originCv.identity = stripCompetingYear(originCv.identity);
+  }
+  return originCv;
 }
 
 function detectSource(car, detail) {
@@ -95,7 +136,7 @@ function vegvesenLock(extras) {
   return omitEmpty({
     make: veg.make || undefined,
     model: veg.model || undefined,
-    year: veg.year || veg.firstRegYear || undefined,
+    // year / aar / firstRegYear intentionally omitted — ERP model_year is the only origin year
     fuel: veg.fuel || undefined,
     hk: veg.hk || undefined,
     gearbox: veg.gearbox || undefined,
@@ -109,7 +150,8 @@ function vegvesenLock(extras) {
 }
 
 /**
- * car.info plate identity — make/model/year only.
+ * car.info plate identity — make/model only.
+ * Year is not attached: identity.year must not compete with ERP model_year.
  * Explicitly refuses to copy any km field onto origin.
  */
 function plateIdentityFromCarInfo(carInfo) {
@@ -117,13 +159,11 @@ function plateIdentityFromCarInfo(carInfo) {
   const result = carInfo.result || carInfo;
   const make = textOrNull(result.brand || result.make);
   const model = textOrNull(result.series || result.model || result.car_name);
-  const year = asPositiveNumber(result.model_year || result.year);
-  if (!make && !model && !year) return null;
+  if (!make && !model) return null;
   return omitEmpty({
     source: 'car.info',
     make,
     model,
-    year,
   });
 }
 
@@ -132,18 +172,21 @@ function applyCarInfoIdentity(originCv, carInfo) {
     throw new Error('applyCarInfoIdentity: originCv required');
   }
   const lockedKm = originCv.km;
+  const lockedYear = originCv.model_year;
   const identity = plateIdentityFromCarInfo(carInfo);
   const next = {
     ...originCv,
-    identity: identity || originCv.identity || null,
+    identity: identity || stripCompetingYear(originCv.identity) || null,
   };
   if (identity) {
     if (!next.make && identity.make) next.make = identity.make;
     if (!next.model && identity.model) next.model = identity.model;
   }
   next.km = lockedKm;
+  lockOriginCvYears(next, lockedYear);
   if (Object.prototype.hasOwnProperty.call(next, 'origin')) {
     next.origin = { ...next.origin, km: lockedKm };
+    lockOriginCvYears(next.origin, lockedYear);
   }
   return next;
 }
@@ -153,6 +196,7 @@ function buildOriginCv({ liste3Car, detail, extras } = {}) {
   const nested = pickNestedCarData(car) || {};
   const erpId = car.id != null ? car.id : (car.erpId != null ? car.erpId : null);
   const km = originKmFromListe3(car);
+  const modelYear = originModelYearFromListe3(car);
   const seller_comment = mergeSellerComment(detail, car);
   const flags = flagComment(seller_comment);
   const veg = vegvesenLock(extras || {});
@@ -175,13 +219,12 @@ function buildOriginCv({ liste3Car, detail, extras } = {}) {
     writes_erp: WRITES_ERP,
   };
 
-  if (nested.model_year != null && nested.model_year !== '') {
-    const my = Number(nested.model_year);
-    if (Number.isFinite(my) && my > 0) cv.model_year = my;
-  }
+  if (modelYear != null) cv.model_year = modelYear;
   if (nested.model_series) cv.model_series = String(nested.model_series);
 
   Object.assign(cv, veg);
+  cv.km = km;
+  lockOriginCvYears(cv, modelYear);
 
   if (extras && extras.eu_km != null) {
     const eu = asPositiveNumber(extras.eu_km);
@@ -195,6 +238,15 @@ function buildOriginCv({ liste3Car, detail, extras } = {}) {
 function lockedKm(originCv, fallback) {
   if (originCv && originCv.km != null) {
     const n = Number(originCv.km);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  const fb = Number(fallback);
+  return Number.isFinite(fb) && fb > 0 ? fb : null;
+}
+
+function lockedModelYear(originCv, fallback) {
+  if (originCv && originCv.model_year != null) {
+    const n = Number(originCv.model_year);
     if (Number.isFinite(n) && n > 0) return n;
   }
   const fb = Number(fallback);
@@ -231,6 +283,7 @@ async function originCv(erpId, opts = {}) {
 const api = {
   WRITES_ERP,
   originKmFromListe3,
+  originModelYearFromListe3,
   mergeSellerComment,
   detectSource,
   plateIdentityFromCarInfo,
@@ -238,6 +291,8 @@ const api = {
   buildOriginCv,
   originCv,
   lockedKm,
+  lockedModelYear,
+  lockOriginCvYears,
   sameOriginCv,
   isOwnSoldComp,
   dropOwnSold,

@@ -5,7 +5,7 @@ Shared origin-CV + chef dossier-read. See the repo-root [README](../README.md).
 `writes_erp` is always false. Pulse (`mikeljungbergtvedt.github.io`) is not this repo.
 
 ```
-origin-cv.js        buildOriginCv + km lock + car.info identity
+origin-cv.js        buildOriginCv + km/model_year lock + car.info identity
 read-dossier.js     Easy/V3/V3G/Bot4 leser {erpId}-{REGNR}.json
 analog-comps.js     analog-regler, alltid tall, aldri 0 comps, cap ask*0.95
 chef-runner.js      dossier → Finn-utpris JSON (Claude+Grok eller dry-run)
@@ -31,7 +31,7 @@ const hit = jr.loadForChef({ chef: 'easy', internnr: erpId, regnr });
 if (hit.ok && hit.skipOwnSearch) {
   // bruk hit.origin_cv + hit.pool / hit.comps (flat {price, km, url, title, year})
 } else if (hit.ok) {
-  // dossier finnes, origin.km låst — men mapped comps tom: KJØR eget Finn-søk
+  // dossier finnes, origin.km + model_year låst — men mapped comps tom: KJØR eget Finn-søk
 } else {
   // gammel søk, allerede logget
 }

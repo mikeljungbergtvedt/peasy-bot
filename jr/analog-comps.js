@@ -215,9 +215,8 @@ function median(nums) {
 
 function residualPrice(originCv) {
   const identity = (originCv && originCv.identity) || {};
-  const year = asPositiveNumber(
-    (originCv && (originCv.year || originCv.model_year)) || identity.year
-  ) || (new Date().getFullYear() - 5);
+  const year = asPositiveNumber(originCv && originCv.model_year)
+    || (new Date().getFullYear() - 5);
   const age = Math.max(0, new Date().getFullYear() - year);
   const km = asPositiveNumber(originCv && originCv.km) || 100000;
   const make = String((originCv && originCv.make) || identity.make || '').toLowerCase();

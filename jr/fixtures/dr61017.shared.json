@@ -1,0 +1,43 @@
+{
+  "schema": "peasy-jr-dossier/v1",
+  "trinn": 1,
+  "writes_erp": false,
+  "chef": "shared",
+  "chefs": ["easy", "v3", "v3g", "bot4"],
+  "origin_cv": {
+    "regnr": "DR61017",
+    "erpId": 4471,
+    "source": "peasy",
+    "km": 108000,
+    "seller_comment": "",
+    "writes_erp": false,
+    "model_year": 2017,
+    "year": 2019,
+    "aar": 2019,
+    "model_series": "V90",
+    "identity": {
+      "source": "car.info",
+      "make": "Volvo",
+      "model": "V90",
+      "year": 2018
+    },
+    "make": "Volvo",
+    "model": "V90"
+  },
+  "identity": {
+    "source": "car.info",
+    "make": "Volvo",
+    "model": "V90",
+    "year": 2018
+  },
+  "finn": {
+    "q": "Volvo V90",
+    "url": "https://www.finn.no/mobility/search/car?q=Volvo+V90&registration_class=1&sales_form=1",
+    "year": null,
+    "km": null,
+    "kW": null
+  },
+  "own_sold": false,
+  "own_sold_excluded": true,
+  "comps": []
+}

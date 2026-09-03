@@ -42,14 +42,20 @@ async function main() {
   const dossier = readDossierFile(fixture);
   assert.strictEqual(dossier.writes_erp, false);
   assert.strictEqual(dossier.origin_cv.km, 11820);
+  assert.strictEqual(dossier.origin_cv.model_year, 2021);
+  assert.ok(!dossier.origin_cv.identity.year);
+  assert.ok(!dossier.identity.year);
 
-  // dossier origin.km preserved against car.info / Finn km
+  // dossier origin.km + model_year preserved against car.info / Finn / Vegvesen
   const poisoned = applyCarInfoIdentity(dossier.origin_cv, {
-    result: { brand: 'Tesla', series: 'Model 3', mileage: 999999, km: 42 },
+    result: { brand: 'Tesla', series: 'Model 3', mileage: 999999, km: 42, model_year: 2018, year: 2018 },
   });
   assert.strictEqual(poisoned.km, 11820);
-  const locked = preserveOriginKm(dossier.origin_cv, { result: { km: 1, mileage: 2 } });
+  assert.strictEqual(poisoned.model_year, 2021);
+  assert.ok(!poisoned.identity.year);
+  const locked = preserveOriginKm(dossier.origin_cv, { result: { km: 1, mileage: 2, model_year: 2019, year: 2019 } });
   assert.strictEqual(locked.km, 11820);
+  assert.strictEqual(locked.model_year, 2021);
   assert.strictEqual(locked.origin_cv ? locked.origin_cv.km : locked.km, 11820);
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jr-dossier-'));
@@ -60,6 +66,8 @@ async function main() {
   assert.strictEqual(hit.skipOwnSearch, false, 'empty mapped comps must not skip own Finn');
   assert.ok(Array.isArray(hit.pool) && hit.pool.length === 0);
   assert.strictEqual(hit.origin_cv.km, 11820);
+  assert.strictEqual(hit.origin_cv.model_year, 2021);
+  assert.ok(!hit.origin_cv.identity.year);
   assert.strictEqual(hit.writes_erp, false);
   const v3 = loadForChef({ chef: 'v3', internnr: 4202, regnr: 'el 54991', dir: tmp });
   const v3g = loadForChef({ chef: 'v3g', erpId: 4202, regnr: 'EL54991', dir: tmp });
@@ -163,6 +171,7 @@ async function main() {
 
   const found = findDossier({ erpId: 4202, regnr: 'EL54991', dir: tmp });
   assert.strictEqual(found.origin_cv.km, 11820);
+  assert.strictEqual(found.origin_cv.model_year, 2021);
 
   // Nested Finn ads without top-level .price (2 Sep Mini empty-pool bug)
   const nestedPath = path.join(__dirname, 'fixtures', 'nested-finn-ads.json');
@@ -180,12 +189,44 @@ async function main() {
   assert.strictEqual(nestedHit.ok, true);
   assert.strictEqual(nestedHit.writes_erp, false);
   assert.strictEqual(nestedHit.origin_cv.km, 11820);
+  assert.strictEqual(nestedHit.origin_cv.model_year, 2021);
   const n = (nestedHit.pool || nestedHit.comps || []).length;
   assert.ok(n >= 1 || nestedHit.skipOwnSearch === false, 'n>=1 OR skipOwnSearch false');
   assert.strictEqual(nestedHit.skipOwnSearch, n >= 1);
   assert.ok(n >= 1, 'nested fixture must map to a usable pool');
   assert.ok(nestedHit.comps.every(c => c.price > 0));
   assert.deepStrictEqual(nestedHit.pool, nestedHit.comps);
+
+  // DR61017 internnr 4471: ERP førstegang 2017 wins vs car.info 2018 and Vegvesen/sjef 2019
+  const drFixture = path.join(__dirname, 'fixtures', 'dr61017.shared.json');
+  const drDossier = readDossierFile(drFixture);
+  assert.strictEqual(drDossier.writes_erp, false);
+  assert.strictEqual(drDossier.origin_cv.km, 108000);
+  assert.strictEqual(drDossier.origin_cv.model_year, 2017);
+  assert.ok(!drDossier.origin_cv.year);
+  assert.ok(!drDossier.origin_cv.aar);
+  assert.ok(!drDossier.origin_cv.identity.year);
+  assert.ok(!drDossier.identity.year);
+
+  const drTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'jr-dr61017-'));
+  fs.writeFileSync(path.join(drTmp, '4471-DR61017.json'), JSON.stringify(JSON.parse(fs.readFileSync(drFixture, 'utf8'))));
+  const easyDr = loadForChef({ chef: 'easy', erpId: 4471, internnr: 4471, regnr: 'DR61017', dir: drTmp });
+  const v3Dr = loadForChef({ chef: 'v3', internnr: 4471, regnr: 'dr61017', dir: drTmp });
+  const v3gDr = loadForChef({ chef: 'v3g', erpId: 4471, regnr: 'DR61017', dir: drTmp });
+  const bot4Dr = loadForChef({ chef: 'bot4', erpId: 4471, internnr: 4471, regnr: 'DR61017', dir: drTmp });
+  for (const chefHit of [easyDr, v3Dr, v3gDr, bot4Dr]) {
+    assert.strictEqual(chefHit.ok, true);
+    assert.strictEqual(chefHit.writes_erp, false);
+    assert.strictEqual(chefHit.skipOwnSearch, chefHit.pool.length >= 1);
+    assert.strictEqual(chefHit.origin_cv.km, 108000);
+    assert.strictEqual(chefHit.origin_cv.model_year, 2017);
+    assert.ok(!chefHit.origin_cv.year, 'vegvesen/sjef year must not win');
+    assert.ok(!chefHit.origin_cv.aar, 'vegvesen.aar must not win');
+    assert.ok(!chefHit.origin_cv.identity || !chefHit.origin_cv.identity.year, 'car.info identity.year must not compete');
+  }
+  assert.strictEqual(JSON.stringify(easyDr.origin_cv), JSON.stringify(v3Dr.origin_cv));
+  assert.strictEqual(JSON.stringify(v3gDr.origin_cv), JSON.stringify(bot4Dr.origin_cv));
+  assert.strictEqual(JSON.stringify(easyDr.origin_cv), JSON.stringify(bot4Dr.origin_cv));
 
   const analogNested = assertAlwaysNumber(finnUtprisFromDossier(nestedRaw));
   assert.ok(analogNested.comps.length >= 1);
@@ -201,6 +242,8 @@ async function main() {
   assert.ok(rebuiltNested.comps.length >= 1);
   assert.ok(rebuiltNested.comps.every(c => typeof c.price === 'number' && c.price > 0));
   assert.strictEqual(rebuiltNested.origin_cv.km, 11820);
+  assert.strictEqual(rebuiltNested.origin_cv.model_year, 2021);
+  assert.ok(!rebuiltNested.origin_cv.identity.year);
 
   const emptyNested = {
     origin_cv: { ...nestedRaw.origin_cv },
@@ -214,9 +257,10 @@ async function main() {
   assert.strictEqual(emptyAdsHit.ok, true);
   assert.strictEqual(emptyAdsHit.skipOwnSearch, false);
   assert.strictEqual(emptyAdsHit.origin_cv.km, 11820);
+  assert.strictEqual(emptyAdsHit.origin_cv.model_year, 2021);
   assert.ok(analogComps(emptyNested).length >= 1, 'chef-runner never finishes with 0 comps');
 
-  console.log('ok — jr loop: origin.km 11820, nested Finn map, skipOwnSearch, pull kopierer kun jr/');
+  console.log('ok — jr loop: origin.km+model_year ERP-låst, nested Finn map, skipOwnSearch, pull kopierer kun jr/');
 }
 
 main().catch(err => {
