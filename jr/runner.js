@@ -53,6 +53,7 @@ async function getErpToken() {
 /**
  * Raw liste 3 rows. Do not apply XLSX km-cache.
  * origin.km is read from drive_no_car_data.mileage only.
+ * origin.model_year is read from drive_no_car_data.model_year only (ERP førstegang).
  */
 async function fetchListe3(token) {
   const res = await fetch(
@@ -138,9 +139,12 @@ async function processCar(token, car) {
   if (locked.km !== withDetail.km) {
     throw new Error('car.info overwrote origin.km — abort');
   }
+  if (locked.model_year !== withDetail.model_year) {
+    throw new Error('car.info overwrote origin.model_year — abort');
+  }
   const { shared, byChef } = dossiersForChefs({ originCv: locked, carInfo });
   const file = writeDossiers(shared, byChef);
-  log(`${locked.regnr} erp=${locked.erpId} km=${locked.km} writes_erp=${shared.writes_erp} → ${file}`);
+  log(`${locked.regnr} erp=${locked.erpId} km=${locked.km} year=${locked.model_year} writes_erp=${shared.writes_erp} → ${file}`);
   return shared;
 }
 

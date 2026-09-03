@@ -24,6 +24,9 @@ function buildDossier({ originCv, carInfo, comps, finn, chef } = {}) {
   if (locked.km !== originCv.km) {
     throw new Error('buildDossier: car.info must never overwrite origin.km');
   }
+  if (locked.model_year !== originCv.model_year) {
+    throw new Error('buildDossier: car.info must never overwrite origin.model_year');
+  }
   const { merke, modell } = merkeModellFrom(locked);
   const q = buildFinnQuery(merke, modell);
   const url = buildFinnUrl(merke, modell);

@@ -4,11 +4,13 @@
 const assert = require('assert');
 const {
   originKmFromListe3,
+  originModelYearFromListe3,
   mergeSellerComment,
   buildOriginCv,
   applyCarInfoIdentity,
   plateIdentityFromCarInfo,
   lockedKm,
+  lockedModelYear,
   sameOriginCv,
   dropOwnSold,
   isOwnSoldComp,
@@ -52,6 +54,11 @@ async function main() {
   assert.strictEqual(originKmFromListe3({ mileage: 104450 }), null);
   assert.strictEqual(originKmFromListe3({ driveNoCarData: { mileage: '9000' } }), 9000);
 
+  // model_year from liste 3 nested drive_no_car_data.model_year only (ERP førstegang)
+  assert.strictEqual(originModelYearFromListe3(liste3Car), 2021);
+  assert.strictEqual(originModelYearFromListe3({ model_year: 2019 }), null);
+  assert.strictEqual(originModelYearFromListe3({ driveNoCarData: { modelYear: '2016' } }), 2016);
+
   const easy = chefCaller('easy', liste3Car, detail);
   const v3 = chefCaller('v3', liste3Car, detail);
   const v3g = chefCaller('v3g', liste3Car, detail);
@@ -90,13 +97,70 @@ async function main() {
   const ident = plateIdentityFromCarInfo(ci);
   assert.strictEqual(ident.make, 'Tesla');
   assert.ok(!Object.prototype.hasOwnProperty.call(ident, 'km'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(ident, 'year'), 'identity.year must not compete with ERP model_year');
   const enriched = applyCarInfoIdentity(easy, ci);
   assert.strictEqual(enriched.km, 11820);
+  assert.strictEqual(enriched.model_year, 2021);
   assert.strictEqual(enriched.identity.make, 'Tesla');
+  assert.ok(!enriched.identity.year);
   assert.notStrictEqual(enriched.km, ci.result.mileage);
 
   const locked = lockedKm(enriched, 104450);
   assert.strictEqual(locked, 11820);
+  assert.strictEqual(lockedModelYear(enriched, 2019), 2021);
+
+  // DR61017 internnr 4471: ERP førstegang wins against car.info 2018 and Vegvesen/sjef 2019
+  const dr61017 = {
+    id: 4471,
+    internnr: 4471,
+    registration_number: 'DR61017',
+    model_year: 2018, // poisoned list-mapping / chef-ident — MUST be ignored
+    drive_no_car_data: {
+      mileage: 108000,
+      model_year: 2017, // ERP førstegang — the only allowed origin year
+    },
+  };
+  const drCv = buildOriginCv({
+    liste3Car: dr61017,
+    extras: {
+      vegvesen: {
+        year: 2019,
+        aar: 2019,
+        firstRegYear: 2019,
+        firstRegMonth: 11,
+        make: 'Volvo',
+        model: 'V90',
+      },
+    },
+  });
+  assert.strictEqual(originKmFromListe3(dr61017), 108000);
+  assert.strictEqual(originModelYearFromListe3(dr61017), 2017);
+  assert.strictEqual(drCv.km, 108000);
+  assert.strictEqual(drCv.model_year, 2017);
+  assert.ok(!Object.prototype.hasOwnProperty.call(drCv, 'year'), 'vegvesen.year must not land on origin_cv');
+  assert.ok(!Object.prototype.hasOwnProperty.call(drCv, 'aar'), 'vegvesen.aar must not land on origin_cv');
+  assert.strictEqual(drCv.make, 'Volvo');
+  assert.strictEqual(drCv.model, 'V90');
+
+  const drCi = {
+    result: {
+      brand: 'Volvo',
+      series: 'V90',
+      model_year: 2018,
+      year: 2018,
+      mileage: 1,
+      km: 2,
+    },
+  };
+  const drEnriched = applyCarInfoIdentity(drCv, drCi);
+  assert.strictEqual(drEnriched.km, 108000);
+  assert.strictEqual(drEnriched.model_year, 2017);
+  assert.strictEqual(drEnriched.identity.make, 'Volvo');
+  assert.strictEqual(drEnriched.identity.model, 'V90');
+  assert.ok(!drEnriched.identity.year, 'car.info identity.year must not compete');
+  assert.ok(!drEnriched.year);
+  assert.ok(!drEnriched.aar);
+  assert.strictEqual(lockedModelYear(drEnriched, 2019), 2017);
 
   // Finn q = merke + modell, no year/km/kW
   const q = buildFinnQuery('Tesla 2021 150kW 20000 km', 'Model 3');
@@ -126,6 +190,9 @@ async function main() {
   assert.strictEqual(shared.finn.km, null);
   assert.strictEqual(shared.finn.kW, null);
   assert.strictEqual(shared.origin_cv.km, 11820);
+  assert.strictEqual(shared.origin_cv.model_year, 2021);
+  assert.ok(!shared.origin_cv.identity.year);
+  assert.ok(!shared.identity.year);
   const bytes = ['easy', 'v3', 'v3g', 'bot4'].map(c => JSON.stringify(byChef[c].origin_cv));
   assert.strictEqual(new Set(bytes).size, 1);
 
@@ -173,7 +240,7 @@ async function main() {
   await guarded('https://api.biladministrasjon.no/c2b_module/peasy/processing/final_estimate?per_page=1', { method: 'GET' });
   assert.strictEqual(blocked.length, 1);
 
-  console.log('ok — origin-CV identical for easy/v3/v3g, km=11820 (liste 3), writes_erp=false');
+  console.log('ok — origin-CV identical for easy/v3/v3g, km+model_year ERP-låst, writes_erp=false');
 }
 
 main().catch(err => {

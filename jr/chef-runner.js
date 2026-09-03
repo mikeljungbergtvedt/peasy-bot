@@ -96,6 +96,7 @@ function buildPrompt(dossier, analog) {
     'Alltid et tall. Ikke 0. Ikke null.',
     'Bruk analog-comps. Ikke own_sold (Peasy/Autoringen/Drive/Ordna).',
     `origin.km er LÅST på ${cv.km} — ikke overskriv fra car.info/Finn.`,
+    `origin.model_year er LÅST på ${cv.model_year} (ERP førstegang drive_no_car_data.model_year) — ikke Vegvesen/car.info/sjef-ident.`,
     analog.ask ? `Origin har aktiv Finn-ask ${analog.ask}. Cap utpris på ask*${ASK_CAP}.` : '',
     'ORIGIN:',
     JSON.stringify({
@@ -104,7 +105,7 @@ function buildPrompt(dossier, analog) {
       km: cv.km,
       make: cv.make,
       model: cv.model || cv.model_series,
-      year: cv.year || cv.model_year,
+      year: cv.model_year,
       seller_comment: cv.seller_comment,
     }, null, 2),
     'ANALOG-COMPS:',
@@ -118,6 +119,9 @@ async function runChefOnDossier(dossier, opts = {}) {
   const origin_cv = preserveOriginKm(dossier.origin_cv, opts.carInfo || null);
   if (origin_cv.km !== dossier.origin_cv.km) {
     throw new Error('chef-runner: origin.km must stay locked');
+  }
+  if (origin_cv.model_year !== dossier.origin_cv.model_year) {
+    throw new Error('chef-runner: origin.model_year must stay locked');
   }
 
   const haveAi = !!(ANTHROPIC_KEY || GROK_KEY) && !opts.forceDry;

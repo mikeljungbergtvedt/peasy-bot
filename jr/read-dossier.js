@@ -10,13 +10,14 @@
  * comps.length>=1. Dossier with empty pool → skipOwnSearch=false, still
  * return origin_cv (locked ERP km); chefs MUST run their own Finn search.
  * Missing dossier → fallback to old search + log.
- * origin.km is never overwritten. own_sold comps are dropped.
+ * origin.km is never overwritten. origin.model_year is locked to ERP
+ * førstegang (drive_no_car_data.model_year). own_sold comps are dropped.
  * writes_erp is always false.
  */
 
 const fs = require('fs');
 const path = require('path');
-const { applyCarInfoIdentity, upperRegnr, WRITES_ERP } = require('./origin-cv');
+const { applyCarInfoIdentity, lockOriginCvYears, upperRegnr, WRITES_ERP } = require('./origin-cv');
 const { assertJrFinnUrl } = require('./finn-query');
 const { mapChefComps } = require('./analog-comps');
 
@@ -80,8 +81,17 @@ function freezeOriginKm(dossier) {
     ? dossier.origin
     : null;
   const km = cv && cv.km != null ? cv.km : (nested && nested.km != null ? nested.km : null);
-  if (cv) cv.km = km;
-  if (nested) nested.km = km;
+  const modelYear = cv && cv.model_year != null
+    ? cv.model_year
+    : (nested && nested.model_year != null ? nested.model_year : null);
+  if (cv) {
+    cv.km = km;
+    lockOriginCvYears(cv, modelYear);
+  }
+  if (nested) {
+    nested.km = km;
+    lockOriginCvYears(nested, modelYear);
+  }
   return km;
 }
 
@@ -89,10 +99,19 @@ function sanitizeDossier(raw, filePath) {
   if (!raw || typeof raw !== 'object') throw new Error('readDossier: invalid JSON');
   const dossier = JSON.parse(JSON.stringify(raw));
   const lockedKmValue = freezeOriginKm(dossier);
+  const lockedYear = dossier.origin_cv && dossier.origin_cv.model_year;
   dossier.writes_erp = WRITES_ERP;
   if (dossier.origin_cv && typeof dossier.origin_cv === 'object') {
     dossier.origin_cv.writes_erp = WRITES_ERP;
     dossier.origin_cv.km = lockedKmValue;
+    lockOriginCvYears(dossier.origin_cv, lockedYear);
+  }
+  if (dossier.identity && typeof dossier.identity === 'object') {
+    const ident = { ...dossier.identity };
+    delete ident.year;
+    delete ident.aar;
+    delete ident.model_year;
+    dossier.identity = ident;
   }
   dossier.own_sold = false;
   dossier.own_sold_excluded = true;
@@ -134,11 +153,14 @@ function logFallback({ chef, erpId, internnr, regnr, reason } = {}) {
 
 function preserveOriginKm(originCv, carInfo) {
   if (!originCv) return originCv;
-  const before = originCv.km;
+  const beforeKm = originCv.km;
+  const beforeYear = originCv.model_year;
   const next = applyCarInfoIdentity(originCv, carInfo || null);
-  next.km = before;
+  next.km = beforeKm;
+  lockOriginCvYears(next, beforeYear);
   if (Object.prototype.hasOwnProperty.call(next, 'origin')) {
-    next.origin = { ...next.origin, km: before };
+    next.origin = { ...next.origin, km: beforeKm };
+    lockOriginCvYears(next.origin, beforeYear);
   }
   return next;
 }
@@ -180,13 +202,15 @@ function loadForChef({ chef, erpId, internnr, regnr, dir } = {}) {
   if (skipOwnSearch) {
     log(
       `${name} leser Jr-dossier ${dossier._path} km=${origin_cv && origin_cv.km} ` +
+      `year=${origin_cv && origin_cv.model_year} ` +
       `n_comps=${pool.length} writes_erp=${WRITES_ERP} — skipOwnSearch=true`
     );
   } else {
     log(
       `${name} leser Jr-dossier ${dossier._path} km=${origin_cv && origin_cv.km} ` +
+      `year=${origin_cv && origin_cv.model_year} ` +
       `n_comps=0 writes_erp=${WRITES_ERP} — mapped comps tom (Mini-pool tom). ` +
-      `skipOwnSearch=false — sjef MÅ kjøre eget Finn-søk. origin.km låst.`
+      `skipOwnSearch=false — sjef MÅ kjøre eget Finn-søk. origin.km+model_year låst.`
     );
   }
   return {

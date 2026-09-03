@@ -18,7 +18,8 @@ Easy V7 (`peasy-auto.js`) lives **only on Mini**. Mini-pull copies **only** `jr/
 
 - **`writes_erp: false`** — Jr never PUT/POSTs to ERP (login + GET only).
 - **`origin.km`** comes from ERP **liste 3** nested `drive_no_car_data.mileage` only. Not XLSX column 22, not a stale queue mileage.
-- **car.info** may add plate *identity* (make / model). It **never** overwrites `origin.km`.
+- **`origin.model_year`** comes from ERP **liste 3** nested `drive_no_car_data.model_year` only (førstegangsregistrering). Not Vegvesen `year`/`aar`, not car.info `identity.year`, not chef-ident.
+- **car.info** may add plate *identity* (make / model). It **never** overwrites `origin.km` or `origin.model_year`, and it does not attach a competing year.
 - **Finn** `q = merke + modell`. No year, no km, no kW — not in `q`, not as filters.
 - **No `own_sold`** — Peasy / Autoringen / Drive sold comps are dropped.
 - **Dossier JSON** — one origin-CV, same bytes for Easy, V3, V3G and Bot4.
