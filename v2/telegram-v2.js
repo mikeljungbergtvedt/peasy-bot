@@ -12,6 +12,8 @@
 // Ren tekst, ingen emoji (ERP-safe).
 
 import 'dotenv/config';
+import { createRequire } from 'module';
+const { telegramFetch } = createRequire(import.meta.url)('../shared/outbound.js');
 
 const TOKEN = process.env.TELEGRAM_TOKEN_V2;
 const CHAT  = process.env.TELEGRAM_CHAT_ID_V2;
@@ -63,7 +65,7 @@ export async function sendV2Eval(text) {
   try {
     for (let i = 0; i < chunks.length; i++) {
       const suffix = chunks.length > 1 ? `\n<i>(${i + 1}/${chunks.length})</i>` : '';
-      const res = await fetch(url, {
+      const res = await telegramFetch(TOKEN, 'sendMessage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -72,7 +74,7 @@ export async function sendV2Eval(text) {
           parse_mode: 'HTML',
           disable_web_page_preview: true,
         }),
-      });
+      }, { url });
       const json = await res.json();
       if (!res.ok || !json.ok) return { ok: false, error: json.description || `HTTP ${res.status}`, sent: i };
       lastId = json.result.message_id;

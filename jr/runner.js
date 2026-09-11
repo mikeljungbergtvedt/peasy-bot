@@ -20,6 +20,7 @@ const { buildOriginCv, applyCarInfoIdentity, originKmFromListe3, upperRegnr } = 
 const { dossiersForChefs } = require('./dossier');
 
 installErpReadonly();
+require('../shared/outbound').installOutboundFetch({ label: 'jr' });
 
 const ERP_BASE = process.env.ERP_BASE || 'https://api.biladministrasjon.no';
 const MINI_DOSSIER_DIR = '/Users/bot/peasy-auto/jr/dossiers';

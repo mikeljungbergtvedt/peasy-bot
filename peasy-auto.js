@@ -40,6 +40,7 @@
 'use strict';
 
 require('dotenv').config();
+require('./shared/outbound').installOutboundFetch({ label: 'peasy-auto' });
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');

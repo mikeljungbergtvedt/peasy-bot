@@ -2,6 +2,7 @@
 // Poller liste 3 hver hele time 07-19, alle ukedager.
 // ERP I/O matcher Easy v20: token, liste, detalj, write, verify, post-chat
 
+import '../shared/install-outbound.mjs';
 import 'dotenv/config';
 import fs from 'fs';
 import {

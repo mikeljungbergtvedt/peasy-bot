@@ -1,6 +1,6 @@
 {
 	"scripts": {
-		"test": "node test-origin-cv.js && node jr/test-jr-loop.js",
+		"test": "node test-origin-cv.js && node jr/test-jr-loop.js && node shared/outbound.test.js && node test-supervisor.js",
 		"jr": "node jr/runner.js",
 		"jr:once": "node jr/runner.js --once",
 		"jr:chef": "node jr/chef-runner.js"
