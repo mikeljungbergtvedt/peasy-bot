@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('./shared/outbound').installOutboundFetch({ label: 'peasy-track' });
 const fs=require('fs'),https=require('https'),path=require('path');
 const TELEGRAM_TOKEN=process.env.TELEGRAM_TOKEN_TRACK||process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID=process.env.TELEGRAM_CHAT_ID_TRACK||process.env.TELEGRAM_CHAT_ID;

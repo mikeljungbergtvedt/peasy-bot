@@ -4,6 +4,7 @@
 // Aksepterer BAADE Grok-stil (registration_number) og gammel v2-stil (regnr).
 // Sender easy_eval-data videre til evalRegnr saa measurement kan kobles.
 
+import '../shared/install-outbound.mjs';
 import 'dotenv/config';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';

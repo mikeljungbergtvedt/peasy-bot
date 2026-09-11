@@ -117,10 +117,14 @@ async function main() {
   // launchd plist ProgramArguments valid
   const jrPlist = path.join(__dirname, 'com.peasy.jr.plist');
   const jrArgs = plistProgramArguments(jrPlist);
-  assert.strictEqual(jrArgs.length, 2, 'jr plist must be node + runner.js (no --once)');
-  assert.ok(jrArgs[0].endsWith('/bin/node'));
-  assert.strictEqual(jrArgs[1], '/Users/bot/peasy-auto/jr/runner.js');
+  assert.deepStrictEqual(jrArgs, [
+    '/bin/bash',
+    '/Users/bot/peasy-auto/scripts/peasy-supervised-node.sh',
+    'jr',
+    '/Users/bot/peasy-auto/jr/runner.js',
+  ]);
   assert.ok(!jrArgs.includes('--once'));
+  assert.strictEqual(plistValue(jrPlist, 'ThrottleInterval'), '60');
   assert.strictEqual(plistValue(jrPlist, 'WorkingDirectory'), '/Users/bot/peasy-auto');
   assert.strictEqual(plistValue(jrPlist, 'JR_DOSSIER_DIR'), '/Users/bot/peasy-auto/jr/dossiers');
   assert.strictEqual(plistValue(jrPlist, 'JR_POLL_MS'), '60000');
@@ -142,6 +146,8 @@ async function main() {
   const dest = path.join(destParent, 'jr');
   fs.mkdirSync(path.join(srcRoot, 'jr'), { recursive: true });
   fs.writeFileSync(path.join(srcRoot, 'jr', 'hello.js'), 'module.exports = 1;\n');
+  fs.mkdirSync(path.join(srcRoot, 'shared'), { recursive: true });
+  fs.writeFileSync(path.join(srcRoot, 'shared', 'outbound.js'), 'module.exports = { ok: true };\n');
   fs.writeFileSync(path.join(srcRoot, 'peasy-auto.js'), 'EASY_V7_ONLY_ON_MINI\n');
   fs.writeFileSync(path.join(srcRoot, 'jr', 'peasy-auto.js'), 'SHOULD_NOT_COPY\n');
   const miniEasy = path.join(destParent, 'peasy-auto.js');
@@ -157,6 +163,7 @@ async function main() {
     },
   });
   assert.ok(fs.existsSync(path.join(dest, 'hello.js')), 'jr/ files must be copied');
+  assert.ok(fs.existsSync(path.join(destParent, 'shared', 'outbound.js')), 'shared/ must be copied for backoff');
   assert.ok(!fs.existsSync(path.join(dest, 'peasy-auto.js')), 'must not copy peasy-auto.js');
   assert.strictEqual(fs.readFileSync(miniEasy, 'utf8'), 'MINI_EASY_V7_BACKUP_OK\n');
   assert.strictEqual(fs.readFileSync(path.join(destParent, 'peasy-auto.js.bak'), 'utf8'), 'KEEP_BACKUP\n');
@@ -216,7 +223,7 @@ async function main() {
   assert.strictEqual(emptyAdsHit.origin_cv.km, 11820);
   assert.ok(analogComps(emptyNested).length >= 1, 'chef-runner never finishes with 0 comps');
 
-  console.log('ok — jr loop: origin.km 11820, nested Finn map, skipOwnSearch, pull kopierer kun jr/');
+  console.log('ok — jr loop: origin.km 11820, nested Finn map, skipOwnSearch, pull kopierer jr/ + shared/');
 }
 
 main().catch(err => {

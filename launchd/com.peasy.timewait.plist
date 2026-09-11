@@ -3,39 +3,30 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.peasy.auto</string>
+  <string>com.peasy.timewait</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/bot/peasy-auto/scripts/peasy-supervised-node.sh</string>
-    <string>peasy-auto</string>
-    <string>/Users/bot/peasy-auto/peasy-auto.js</string>
+    <string>/Users/bot/peasy-auto/scripts/peasy-timewait-watchdog.sh</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/bot/peasy-auto</string>
+  <key>StartInterval</key>
+  <integer>60</integer>
   <key>RunAtLoad</key>
   <true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>Crashed</key>
-    <true/>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
   <key>ThrottleInterval</key>
   <integer>60</integer>
   <key>StandardOutPath</key>
-  <string>/Users/bot/peasy-auto/logs.nosync/peasy-auto.out.log</string>
+  <string>/Users/bot/peasy-auto/logs.nosync/timewait.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/bot/peasy-auto/logs.nosync/peasy-auto.err.log</string>
+  <string>/Users/bot/peasy-auto/logs.nosync/timewait.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/Users/bot/.nvm/versions/node/v24.14.0/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>PEASY_HOME</key>
     <string>/Users/bot/peasy-auto</string>
-    <key>PEASY_PROCESS_LABEL</key>
-    <string>peasy-auto</string>
   </dict>
 </dict>
 </plist>

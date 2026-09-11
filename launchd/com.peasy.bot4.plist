@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.peasy.auto</string>
+  <string>com.peasy.bot4</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
     <string>/Users/bot/peasy-auto/scripts/peasy-supervised-node.sh</string>
-    <string>peasy-auto</string>
-    <string>/Users/bot/peasy-auto/peasy-auto.js</string>
+    <string>bot4</string>
+    <string>/Users/bot/peasy-auto/bot4/watcher.js</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/bot/peasy-auto</string>
@@ -25,9 +25,9 @@
   <key>ThrottleInterval</key>
   <integer>60</integer>
   <key>StandardOutPath</key>
-  <string>/Users/bot/peasy-auto/logs.nosync/peasy-auto.out.log</string>
+  <string>/Users/bot/peasy-auto/logs.nosync/bot4.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/bot/peasy-auto/logs.nosync/peasy-auto.err.log</string>
+  <string>/Users/bot/peasy-auto/logs.nosync/bot4.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -35,7 +35,7 @@
     <key>PEASY_HOME</key>
     <string>/Users/bot/peasy-auto</string>
     <key>PEASY_PROCESS_LABEL</key>
-    <string>peasy-auto</string>
+    <string>bot4</string>
   </dict>
 </dict>
 </plist>
