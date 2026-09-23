@@ -306,6 +306,52 @@ assert.strictEqual(odd.lav, odd.peasy_bud_mid - 2500);
 assert.strictEqual(odd.hoy, odd.peasy_bud_mid + 1300);
 assert.notStrictEqual(odd.lav, ff._internal.roundKr(oddRaw - 2500));
 
+const block = ff.formatFossefallBlock(live);
+assert.ok(block.indexOf('FOSSEFALL') === 0);
+assert.ok(block.indexOf('Celle: 150-250|50-120') !== -1);
+assert.ok(block.indexOf('Midt: ') !== -1);
+assert.ok(block.indexOf('114') !== -1);
+assert.ok(block.indexOf('Spenn: ') !== -1);
+assert.ok(block.indexOf('Klargjøring: ') !== -1);
+assert.ok(/1[\s\u00a0\u202f]?000/.test(block), block);
+assert.ok(block.indexOf('A / B / Ordna: samme midt og spenn') !== -1);
+assert.ok(block.indexOf('(skygge)') === -1);
+assert.strictEqual(ff.fossefallCardComplete({ fossefall_v2: live.fossefall_v2 }), true);
+
+const manualBlock = ff.formatFossefallBlock(liveEmpty);
+assert.ok(manualBlock.indexOf('PRIS MANUELT') !== -1);
+assert.ok(manualBlock.indexOf('Celle: 150-250|50-120') !== -1);
+assert.strictEqual(ff.fossefallCardComplete({ fossefall_v2: liveEmpty.fossefall_v2 }), false);
+
+const shadowBlock = ff.formatFossefallBlock(shadow);
+assert.ok(shadowBlock.indexOf('(skygge)') !== -1);
+assert.ok(shadowBlock.indexOf('Midt: ') !== -1);
+
+const abArm = require('./ab-arm');
+assert.strictEqual(abArm.writeArm(4814), 'A');
+assert.strictEqual(abArm.writeArm(4815), 'B');
+assert.strictEqual(abArm.writeArm('4815'), 'B');
+assert.strictEqual(abArm.cacheStampComplete('2026-09-23T12:00:00.000Z', false), true);
+assert.strictEqual(abArm.cacheStampComplete('2026-09-23T12:00:00.000Z', true), false);
+assert.strictEqual(abArm.cacheStampComplete({ fossefallCard: true, celleId: '150-250|50-120' }, true), true);
+assert.strictEqual(abArm.cacheStampComplete({ fossefallCard: false, celleId: null }, true), false);
+assert.strictEqual(abArm.cacheStampComplete(null, true), false);
+
+const { formatEvalCardHybrid } = require('./eval-card-hybrid');
+const qaCard = formatEvalCardHybrid({
+  bil: { id: 4815, registration_number: 'EE85894', model_year: 2018, mileage: 80000, source: 'peasy' },
+  vegData: { make: 'VW', fuel: 'Elektrisk', model: 'ID.Buzz' },
+  seg: { segment: 'normal' },
+  valuation: { fossefall_v2: live.fossefall_v2, fossefall_shadow: { tables_live: true, engine: 'fossefallSatser' }, dLav: live.lav, dHoy: live.hoy, model: 'fossefall-satser' },
+  anchor: { anker_beregning: { anker: 180000 }, confidence: 70 },
+  writeArm: 'B',
+  brreg: { anyDebts: false },
+}, true);
+assert.ok(qaCard.indexOf('Celle: 150-250|50-120') !== -1, 'QA-kort mangler celle');
+assert.ok(qaCard.indexOf('Midt:') !== -1);
+assert.ok(qaCard.indexOf('Spenn:') !== -1);
+assert.ok(qaCard.indexOf('ERP: skrives av B') !== -1);
+
 delete process.env.FOSSEFALL_TABLES_LIVE;
 delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
 
