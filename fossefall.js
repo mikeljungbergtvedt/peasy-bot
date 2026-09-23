@@ -1,23 +1,26 @@
 'use strict';
 /**
- * fossefall.js — v20.143
- * Delbeløp i kroner for A/B/Ordna. Ingen X-faktor.
- * usikkerhet_takst (alias spenn); forhandlermargin_tillegg_bud (B: Tillegg for å treffe bud). returtrekk fjernet (var alias/dobbeltbokføring).
- * STATID_A_LIVE (env, default on): ståtid inn i A (ERP). B/Ordna statid=0. Ståtid legges etter fee og klemmes ikke av margin-maks.
+ * fossefall.js — v20.144
+ * Delbeløp i kroner. Ingen X-faktor.
+ * usikkerhet_takst (alias spenn). returtrekk fjernet (var alias/dobbeltbokføring).
  *
- * v20.143: ett felles fossefall fra Finn (fossefallSatser). A/B/Ordna er profiler på samme midt
- * (1.00 / 0.90 / 0.75), ikke egne motorer. Klargjøring på ny sti er 1000 kr.
+ * v20.144: ett tall, så ett spenn, så profil som merkelapp.
+ * Finn → margin → takst → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
+ * Spenn-tabellens ned|opp legges rundt den samme midten → lav/høy.
+ * A / B / Ordna viser den samme midten og det samme intervallet. De skalerer ikke (ikke ×1.00 / ×0.90 / ×0.75).
+ * STATID_A_LIVE (default på): ståtid inngår i det ene estimatet og kopieres til alle armer. Den klemmes ikke av margin-maks.
  * FOSSEFALL_TABLES_LIVE=1: a/b/ordna kommer fra tabellene.
  * Default (flagget av): gammel computeA/computeBand blir stående; ny motor ligger i fossefall_v2.
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.143';
+const FOSSEFALL_VERSION = 'v20.144';
 
+/** Merkelapp for Softteam. Ingen multiplikator — alle armer deler én midt og ett spenn. */
 const PROFILES = {
-  a: { id: 'a', mult: 1.0, label: 'snill' },
-  b: { id: 'b', mult: 0.9, label: 'tro' },
-  ordna: { id: 'ordna', mult: 0.75, label: 'underpromise' },
+  a: { id: 'a', label: 'snill' },
+  b: { id: 'b', label: 'tro' },
+  ordna: { id: 'ordna', label: 'underpromise' },
 };
 
 /** Ny sti. Gammel Easy-sti (computeA) beholder EASY_COST.klargjoring = 5000. */
@@ -521,13 +524,13 @@ function hardcodedFallback() {
 }
 
 function profileOf(profile) {
-  if (profile && typeof profile === 'object' && Number.isFinite(Number(profile.mult))) {
-    return { id: profile.id || 'custom', mult: Number(profile.mult), label: profile.label || null };
+  if (profile && typeof profile === 'object') {
+    const id = String(profile.id || '').toLowerCase();
+    if (PROFILES[id]) return PROFILES[id];
+    return null;
   }
   const key = String(profile || 'a').toLowerCase();
   if (PROFILES[key]) return PROFILES[key];
-  const n = Number(profile);
-  if (Number.isFinite(n) && n > 0) return { id: 'custom', mult: n, label: null };
   return null;
 }
 
@@ -694,11 +697,11 @@ function skipArm(profile, grunn) {
 }
 
 /**
- * Ett fossefall, én profil.
+ * Ett fossefall. Profilen er bare hvilken arm som vises.
  * Finn − forhandlermargin − avsetning takst − omreg − klargjøring 1000 = AR-bud
- * AR-bud − peasyFee = delt Peasy-midt. Profil (A 1.00 / B 0.90 / Ordna 0.75) ganges på midten.
- * Spenn-tabellens ned|opp legges rundt den profilerte midten.
- * Ståtid (kun A, samme computeStatid) legges etter fee og kan gå forbi margin-maks.
+ * AR-bud − peasyFee = én peasyBud (midt). Ingen profil-skalering.
+ * Spenn ned|opp legges rundt den midten → lav/høy.
+ * Ståtid (samme beløp på alle armer når den er på) kommer etter fee og klemmes ikke av margin-maks.
  */
 function computeSharedFossefall(opts) {
   opts = opts || {};
@@ -730,16 +733,13 @@ function computeSharedFossefall(opts) {
   const arBud = finn - margin - takst - omregKr - KLARGJORING_KR;
   const fee = peasyFee(arBud);
   const midRaw = arBud - fee;
-  const peasyBudMid = Math.round(midRaw * prof.mult);
-  const profilDelta = peasyBudMid - midRaw;
+  const peasyBudMid = Math.round(midRaw);
 
   const lav = peasyBudMid - ned + statidKr;
   const hoy = peasyBudMid + opp + statidKr;
 
   const originCapInfo = opts.originCapInfo || null;
   const origin_cap = (originCapInfo && Number(originCapInfo.kr)) || 0;
-  const tilleggBud = prof.id === 'b' ? { lav: profilDelta, hoy: profilDelta } : emptySide();
-  const ordna_trekk = prof.id === 'ordna' ? { lav: profilDelta, hoy: profilDelta } : emptySide();
 
   return {
     skip: false,
@@ -747,10 +747,10 @@ function computeSharedFossefall(opts) {
     grunn: null,
     profile: prof.id,
     profil: prof.label,
-    profil_mult: prof.mult,
     price_id: looked.priceId,
     km_id: looked.kmId,
     ar_bud: arBud,
+    estimertPeasyBud: peasyBudMid,
     peasy_bud_mid: peasyBudMid,
     finn_utpris: finn,
     origin_cap,
@@ -770,8 +770,8 @@ function computeSharedFossefall(opts) {
     klargjoring: -KLARGJORING_KR,
     usikkerhet_takst: { lav: -ned, hoy: opp },
     spenn: { lav: -ned, hoy: opp },
-    forhandlermargin_tillegg_bud: tilleggBud,
-    ordna_trekk,
+    forhandlermargin_tillegg_bud: emptySide(),
+    ordna_trekk: emptySide(),
     vrakpant_gulv: emptySide(),
     avrunding: { lav: 0, hoy: 0 },
     peasy_avgift: { lav: -fee, hoy: -fee },
@@ -843,9 +843,10 @@ function buildSharedFossefall(opts) {
     looked,
     originCapInfo,
   };
-  const aRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'a', statidKr: live ? statid.kr : 0 }));
-  const bRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'b', statidKr: 0 }));
-  const oRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'ordna', statidKr: 0 }));
+  const statidKr = live ? statid.kr : 0;
+  const aRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'a', statidKr }));
+  const bRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'b', statidKr }));
+  const oRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'ordna', statidKr }));
 
   if (aRaw.skip || bRaw.skip || oRaw.skip) {
     const grunn = aRaw.grunn || bRaw.grunn || oRaw.grunn;
@@ -890,6 +891,10 @@ function buildSharedFossefall(opts) {
     signal: null,
     grunn: null,
     engine: 'fossefallSatser',
+    estimertPeasyBud: a.estimertPeasyBud,
+    peasy_bud_mid: a.peasy_bud_mid,
+    lav: a.lav,
+    hoy: a.hoy,
     price_id: looked.priceId,
     km_id: looked.kmId,
     version: FOSSEFALL_VERSION,
