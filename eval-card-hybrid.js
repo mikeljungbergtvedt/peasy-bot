@@ -16,6 +16,8 @@
 
 'use strict';
 
+const fossefall = require('./fossefall');
+
 function nf(n) {
   const v = Number(n);
   return Number.isFinite(v) ? Math.round(v).toLocaleString('nb-NO') : '?';
@@ -241,7 +243,15 @@ function formatEvalCardHybrid(p, forErp = false) {
   out.push(forErp ? ('Car.info verdivurdering: ' + carInfoUrl2) : ('<a href="' + esc(carInfoUrl2) + '">Car.info verdivurdering</a>'));
   out.push('');
 
-  // ── 7. KALKYLE (Easy calcValuation — fasit som skrives til ERP) ─
+  // ── 6c. FOSSEFALL (QA-blokk). Festes også når writeArm er B — kortet er ikke ERP-skrivingen.
+  const fossefallBlock = fossefall.formatFossefallBlock(val);
+  if (fossefallBlock) {
+    out.push(B('FOSSEFALL'));
+    out.push(forErp ? fossefallBlock : `<pre>${esc(fossefallBlock)}</pre>`);
+    out.push('');
+  }
+
+  // ── 7. KALKYLE (Easy calcValuation — fasit som skrives til ERP når tabellene ikke er live) ─
   const spreadStr = val.spreadPct != null ? `±${(val.spreadPct * 100).toFixed(1)}%` : '?';
   const kalkyleBody = [
     `Bracket: ${val.bracket || '?'}`,
@@ -327,11 +337,17 @@ function formatEvalCardHybrid(p, forErp = false) {
   // ── 12. ERP STATUS (kun ekte biler) ──────────────────────────
   if (bil.id) {
     const v = p.erpVerify || {};
-    const statusFlags = [
-      p.erpWritten ? '✅ D lav/høy skrevet' : '❌ D lav/høy feilet',
-      (p.erpWritten || v.auctionType) ? '✅ Auction type satt' : '❌ Auction type feilet',
-      p.chatPosted ? '✅ Eval-kort postet' : '— Eval-kort ikke postet',
-    ].join(' | ');
+    const statusFlags = p.writeArm === 'B'
+      ? [
+          'ERP: skrives av B',
+          'Easy hopper over skriving (oddetall erpId)',
+          p.chatPosted ? '✅ Eval-kort postet' : '— Eval-kort ikke postet',
+        ].join(' | ')
+      : [
+          p.erpWritten ? '✅ D lav/høy skrevet' : '❌ D lav/høy feilet',
+          (p.erpWritten || v.auctionType) ? '✅ Auction type satt' : '❌ Auction type feilet',
+          p.chatPosted ? '✅ Eval-kort postet' : '— Eval-kort ikke postet',
+        ].join(' | ');
     out.push(B('ERP STATUS'));
     out.push(statusFlags);
   }

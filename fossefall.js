@@ -1026,6 +1026,66 @@ function buildLegacyFossefall(opts) {
   };
 }
 
+function nok(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return Math.round(v).toLocaleString('nb-NO');
+}
+
+/**
+ * QA/eval block. One mid, one Spenn, same labels on A/B/Ordna, celle-id from the tables path.
+ * Empty cell stays PRIS MANUELT. Shown for writeArm B as well as A — the card is not the ERP write.
+ */
+function formatFossefallBlock(valuation) {
+  if (!valuation) return '';
+  const v2 = valuation.fossefall_v2 || ((valuation.a && valuation.b) ? valuation : null);
+  if (!v2 || !v2.a) return '';
+  const shadow = valuation.fossefall_shadow || {};
+  const live = shadow.tables_live != null ? !!shadow.tables_live : !!valuation.tables_live;
+  const a = v2.a || {};
+  const b = v2.b || {};
+  const o = v2.ordna || {};
+  const celle = v2.celleId || a.celleId || '—';
+  const engine = v2.engine || shadow.engine || 'fossefallSatser';
+  const lines = ['FOSSEFALL ' + engine + (live ? '' : ' (skygge)'), 'Celle: ' + celle];
+  if (v2.pris_manuelt || a.skip || a.signal === 'PRIS MANUELT') {
+    lines.push('PRIS MANUELT');
+    const grunn = v2.grunn || a.grunn;
+    if (grunn) lines.push(grunn);
+    return lines.join('\n');
+  }
+  lines.push('Midt: ' + nok(a.peasy_bud_mid) + ' kr');
+  lines.push('Spenn: ' + nok(a.lav) + ' – ' + nok(a.hoy) + ' kr');
+  const klarg = Number(a.klargjoring);
+  lines.push('Klargjøring: ' + nok(Number.isFinite(klarg) ? Math.abs(klarg) : null) + ' kr');
+  lines.push('Ståtid: ' + nok(a.statid || 0) + ' kr');
+  const same = a.peasy_bud_mid != null
+    && a.peasy_bud_mid === b.peasy_bud_mid
+    && b.peasy_bud_mid === o.peasy_bud_mid
+    && a.lav === b.lav
+    && a.hoy === o.hoy;
+  lines.push('A / B / Ordna: ' + (same ? 'samme midt og spenn' : 'AVVIK'));
+  return lines.join('\n');
+}
+
+/** Tables path produced a card Mike can QA: midt, lav, høy, celle-id, same range on every arm. */
+function fossefallCardComplete(valuation) {
+  if (!valuation) return false;
+  const v2 = valuation.fossefall_v2;
+  if (!v2 || v2.pris_manuelt) return false;
+  const a = v2.a;
+  const b = v2.b;
+  const o = v2.ordna;
+  if (!a || a.skip || !b || b.skip || !o || o.skip) return false;
+  if (a.peasy_bud_mid == null || a.lav == null || a.hoy == null) return false;
+  if (a.peasy_bud_mid !== b.peasy_bud_mid || b.peasy_bud_mid !== o.peasy_bud_mid) return false;
+  if (a.lav !== b.lav || a.hoy !== o.hoy) return false;
+  const celle = v2.celleId || a.celleId;
+  if (!celle) return false;
+  if (v2.engine && v2.engine !== 'fossefallSatser') return false;
+  return true;
+}
+
 function buildFossefall(opts) {
   opts = opts || {};
   const legacy = buildLegacyFossefall(opts);
@@ -1084,6 +1144,8 @@ module.exports = {
   KLARGJORING_KR,
   CONFIG_URL,
   buildFossefall,
+  formatFossefallBlock,
+  fossefallCardComplete,
   buildSharedFossefall,
   computeSharedFossefall,
   lookupFossefallCell,

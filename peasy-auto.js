@@ -49,6 +49,7 @@ const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 const originCvLib = require('./origin-cv');
 const fossefall = require('./fossefall');
+const abArm = require('./ab-arm');
 
 const VERSION = 'v20.80';
 
@@ -149,10 +150,18 @@ function writeFinnLink(erpId, finnSelf) {
     fs.writeFileSync(FP, JSON.stringify(m));
   } catch (e) { try { logErr('writeFinnLink ' + erpId, e); } catch (e2) {} }
 }
-function addToCache(cache, erpId) {
-  if (erpId) { cache[String(erpId)] = new Date().toISOString(); }
+function addToCache(cache, erpId, meta) {
+  if (!erpId) return;
+  const stamp = {
+    at: new Date().toISOString(),
+    fossefallCard: !!(meta && meta.fossefallCard),
+    celleId: (meta && meta.celleId) || null,
+    writeArm: (meta && meta.writeArm) || null,
+    erpWritten: !!(meta && meta.erpWritten),
+  };
+  cache[String(erpId)] = stamp;
   saveJSON(CACHE_FILE, cache);
-  log(`Cache: ${erpId} lagt til`);
+  log('Cache: ' + erpId + ' lagt til' + (stamp.fossefallCard ? (' (fossefall ' + stamp.celleId + ')') : ''));
 }
 
 
@@ -440,10 +449,14 @@ async function postToChat(erpId, evalText, token) {
   const checkRes = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}/comments/all`, { headers: authH(token) });
   const checkData = await checkRes.json();
   const existing = Array.isArray(checkData.data) ? checkData.data : [];
-  if (existing.some(c => (c.comment || '').includes('BIL TIL ESTIMERING'))) {
+  const hasCard = existing.some(c => (c.comment || '').includes('BIL TIL ESTIMERING'));
+  const hasFosse = existing.some(c => (c.comment || '').includes('FOSSEFALL'));
+  const refreshingFossefall = hasCard && fossefall.tablesLive() && !hasFosse && String(evalText || '').includes('FOSSEFALL');
+  if (hasCard && !refreshingFossefall) {
     log(`Kommentar: bil ${erpId} har allerede eval-kort — skipper`);
-    return false;
+    return true;
   }
+  if (refreshingFossefall) log('Kommentar: gammelt kort uten FOSSEFALL — poster oppdatert kort for ' + erpId);
   const res = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}/comments`, {
     method: 'POST',
     headers: { ...authH(token), 'Content-Type': 'application/json' },
@@ -1433,7 +1446,78 @@ function applyFossefallShadow(valuation, ctx) {
     + ' A=B=Ordna ' + (s.a_mid != null && s.a_mid === s.b_mid && s.b_mid === s.ordna_mid)
     + (s.grunn ? ' (' + s.grunn + ')' : '')
     + ' legacy ' + legacyLav + '/' + legacyHoy);
+  if (valuation.model === 'fossefall-satser') {
+    const klarg = v2 && v2.a && v2.a.klargjoring;
+    log('Kalkyle [fossefall-satser] celle ' + (s.celleId || '—')
+      + ' midt ' + s.estimertPeasyBud
+      + ' lav/hoy ' + valuation.dLav + '/' + valuation.dHoy
+      + ' klarg ' + (klarg != null ? Math.abs(Number(klarg)) : '—'));
+  }
   return valuation;
+}
+
+function fossefallCtx(extra) {
+  const sold = []
+    .concat((extra && extra.soldForhandler) || [])
+    .concat((extra && extra.soldPrivat) || [])
+    .concat((extra && extra.soldComps) || []);
+  return Object.assign({
+    satser: fossefall.getFossefallSatser(),
+    soldDays: fossefall.extractSoldDays(sold),
+  }, extra || {});
+}
+
+function logErpBand(valuation, erpId) {
+  const arm = abArm.writeArm(erpId);
+  const v2 = valuation && valuation.fossefall_v2;
+  const celle = (v2 && (v2.celleId || (v2.a && v2.a.celleId))) || '—';
+  if (arm === 'B') {
+    log('ERP: skrives av B (erpId ' + erpId + ') — fossefall-kort '
+      + (fossefall.fossefallCardComplete(valuation) ? 'festet' : 'MANGLER'));
+    return arm;
+  }
+  if (valuation && valuation.model === 'fossefall-satser' && fossefall.tablesLive()) {
+    const klarg = v2 && v2.a && v2.a.klargjoring;
+    log('ERP band fra fossefall A: ' + valuation.dLav + '-' + valuation.dHoy
+      + ' celle ' + celle
+      + ' midt ' + (v2 && v2.a && v2.a.peasy_bud_mid)
+      + ' klarg ' + (klarg != null ? Math.abs(Number(klarg)) : '—'));
+  }
+  return arm;
+}
+
+async function writeErpForArm(bil, erpId, valuation, anyDebts, brreg, token) {
+  const arm = logErpBand(valuation, erpId);
+  if (arm !== 'A') return false;
+  if (!valuation || valuation.dLav == null || valuation.dHoy == null) return false;
+  return maybeWriteToERP(bil, erpId, valuation.dLav, valuation.dHoy, valuation.auctionTypeId, anyDebts, brreg, token);
+}
+
+function maybeAddPricedCache(cache, erpId, valuation, erpWritten, chatPosted) {
+  const arm = abArm.writeArm(erpId);
+  const live = fossefall.tablesLive();
+  const complete = fossefall.fossefallCardComplete(valuation);
+  const celle = (valuation && valuation.fossefall_v2 && (valuation.fossefall_v2.celleId || (valuation.fossefall_v2.a && valuation.fossefall_v2.a.celleId))) || null;
+  if (live && !complete) {
+    log('Cache: ' + erpId + ' ikke stemplet — fossefall-kort mangler eller tabellsti feilet');
+    return false;
+  }
+  if (live && !chatPosted) {
+    log('Cache: ' + erpId + ' ikke stemplet — eval-kort med fossefall ble ikke postet');
+    return false;
+  }
+  if (arm === 'A' && !erpWritten) return false;
+  if (arm === 'B' && !chatPosted) {
+    log('Cache: ' + erpId + ' ikke stemplet — B-arm og eval-kort ble ikke postet');
+    return false;
+  }
+  addToCache(cache, erpId, {
+    fossefallCard: live ? complete : false,
+    celleId: celle,
+    writeArm: arm,
+    erpWritten: !!erpWritten,
+  });
+  return true;
 }
 
 async function stopIfPrisManuelt(valuation, regnr, erpId) {
@@ -1441,7 +1525,8 @@ async function stopIfPrisManuelt(valuation, regnr, erpId) {
   const grunn = valuation.pris_manuelt_grunn || 'PRIS MANUELT';
   log('PRIS MANUELT ' + regnr + ': ' + grunn);
   try {
-    await sendTelegram('PRIS MANUELT ' + regnr + ' (ERP ' + erpId + '): ' + grunn + '\nFossefall-tabell er live og cellen kan ikke prises — ingen autoflyt.');
+    const block = fossefall.formatFossefallBlock(valuation);
+    await sendTelegram('PRIS MANUELT ' + regnr + ' (ERP ' + erpId + '): ' + grunn + '\nFossefall-tabell er live og cellen kan ikke prises — ingen autoflyt.' + (block ? ('\n\n' + block) : ''));
   } catch (e) { logErr('pris-manuelt', e); }
   return true;
 }
@@ -1655,7 +1740,11 @@ function formatEvalCard(p, forErp = false) {
     : '   Ikke funnet pa Finn';
 
   // ERP
-  const erpLines = [
+  const erpLines = (p.writeArm === 'B' ? [
+    'ERP: skrives av B',
+    'Easy hopper over skriving (oddetall erpId)',
+    p.chatPosted ? '\u2705 Eval-kort postet til kommentar' : '\u2014 Chat: ikke postet',
+  ] : [
     p.erpWritten ? '\u2705 D lav/hoy skrevet' : '\u274c D lav/hoy FEILET',
     p.erpWritten ? '\u2705 Auction type satt' : '\u274c Auction type ikke satt',
     '\u2705 Heftelser kontrollert',
@@ -1663,7 +1752,7 @@ function formatEvalCard(p, forErp = false) {
     '\u2705 Eiere toglet',
     p.erpWritten ? '\u2705 Lagre data klikket' : '\u274c Lagre data ikke klikket',
     p.chatPosted ? '\u2705 Eval-kort postet til kommentar' : '\u2014 Chat: allerede postet',
-  ].join('\n');
+  ]).join('\n');
 
   const finnSokHeader = forErp
     ? `FINN-SOK ${p.vegData.fuel} | ${(p.bil.carInfo && p.bil.carInfo.model_year) || p.bil.model_year || ''} | ${p.totalCount} treff | ${p.finnUrl}`
@@ -1710,6 +1799,7 @@ D lav \u2013 D hoy: ${val.dLav?.toLocaleString('nb-NO') || '?'} \u2013 ${val.dHo
     `FINN-SOK ${p.vegData.fuel} | ${(p.bil.carInfo && p.bil.carInfo.model_year) || p.bil.model_year || ''} | ${p.totalCount} treff | ${p.finnUrl}`,
     ...(funnelLines ? [funnelLines] : []),
     compLines, ankerLine, modelMixLine, '',
+    ...(fossefall.formatFossefallBlock(val) ? [fossefall.formatFossefallBlock(val), ''] : []),
     'KALKYLE', kalkyleCompact, '',
     'FINN-ANNONSE', finnAnnDisplay, '',
     'HEFTELSER', `   ${p.brreg?.text || 'Ingen heftelser'}`, '',
@@ -1726,6 +1816,7 @@ D lav \u2013 D hoy: ${val.dLav?.toLocaleString('nb-NO') || '?'} \u2013 ${val.dHo
     finnSokHeader,
     ...(funnelLines ? [funnelLines] : []),
     compLines, ankerLine, modelMixLine, '',
+    ...(fossefall.formatFossefallBlock(val) ? ['<b>FOSSEFALL</b>', '<pre>' + fossefall.formatFossefallBlock(val).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>', ''] : []),
     '<b>KALKYLE</b>', kalkyleCompact, '',
     '<b>FINN-ANNONSE</b>', finnAnnDisplay, '',
     `<b>HEFTELSER</b>   ${p.brreg?.text || 'Ingen heftelser'}`,
@@ -1851,9 +1942,12 @@ async function evalCar(bil, page, cache, opts = {}) {
 
   log(`--- ${regnr} (ERP ${erpId}) ---`);
 
-  if (!qaOverrideUrl && isInCache(cache, erpId)) {
+  if (!qaOverrideUrl && abArm.cacheStampComplete(cache[String(erpId)], fossefall.tablesLive())) {
     log(`Cache: ${regnr} allerede skrevet — hopper over`);
     return;
+  }
+  if (!qaOverrideUrl && cache[String(erpId)] && fossefall.tablesLive()) {
+    log('Cache: ' + regnr + ' gammel stempel uten fossefall-kort — priser på nytt');
   }
 
   let vegData;
@@ -2171,12 +2265,12 @@ async function evalCar(bil, page, cache, opts = {}) {
         const anchorF = getAnchor(poolF, segF);
         if (finnSelf && Number(finnSelf.price) > 0) { var _adCap = Math.round(Number(finnSelf.price) * 0.95); if (anchorF.price > _adCap) { anchorF.price = _adCap; anchorF.reason = (anchorF.reason || '') + ' | cap: selgers Finn-annonse x0.95 = ' + _adCap.toLocaleString('nb-NO') + ' kr'; } } // finncap
         const valuationF = calcValuation(anchorF.price, segF.segment, poolF);
-        applyFossefallShadow(valuationF, {
+        applyFossefallShadow(valuationF, fossefallCtx({
           finnUtpris: anchorF.price,
           km: originKm != null ? originKm : bil.mileage,
           modelYear: bil.model_year || (vegData && vegData.firstRegYear),
           bilInfo: fossefallBilInfo(bil, vegData),
-        });
+        }));
         const brregF = await checkBrreg(regnr, page);
         const tokenF = await getErpToken();
         let sdCommentF = null, imageCountF = 0;
@@ -2187,12 +2281,13 @@ async function evalCar(bil, page, cache, opts = {}) {
         } catch (eDf) {}
         if (await stopIfPrisManuelt(valuationF, regnr, erpId)) return;
         if (await _maybeBlock({ sdComment: sdCommentF, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: poolF, segConfidence: segF && segF.confidence, dLav: valuationF.dLav, dHoy: valuationF.dHoy })) return;
-        const erpWrittenF = await maybeWriteToERP(bil, erpId, valuationF.dLav, valuationF.dHoy, valuationF.auctionTypeId, brregF.anyDebts, brregF, tokenF);
+        const erpWrittenF = await writeErpForArm(bil, erpId, valuationF, brregF.anyDebts, brregF, tokenF);
         const erpVerifyF = await maybeVerifyErp(bil, erpId, tokenF);
         const cardF = {
           bil: bil, vegData: vegData, pool: poolF, anchor: anchorF, finnUrl: rF.finnUrl, totalCount: rF.totalCount, seg: segF,
           finnListing: finnSelf, brreg: brregF, valuation: valuationF, sdComment: sdCommentF, imageCount: imageCountF,
           erpWritten: erpWrittenF, erpVerify: erpVerifyF, chatPosted: false, qaOverride: false,
+          writeArm: abArm.writeArm(erpId),
           funnelSteps: (rF && rF.funnelSteps) || [], prevEvals: getPrevEvals(regnr, erpId),
           kmOverride
         };
@@ -2203,7 +2298,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         persistEvalData();
         await sendTelegram(merkeF + formatEvalCard(Object.assign({}, cardF, { chatPosted: chatPostedF }), false),
           (bil.id ? { inline_keyboard: [[{ text: '✅ Send eval', callback_data: 'confirm:' + erpId }, { text: '✏️ Endre anker', callback_data: 'editanchor:' + erpId }, { text: '🗑 Slett cache', callback_data: 'delcache:' + erpId }]] } : undefined));
-        if (erpWrittenF) addToCache(cache, erpId);
+        maybeAddPricedCache(cache, erpId, valuationF, erpWrittenF, chatPostedF);
         try {
           var v2PayloadF = JSON.stringify({
             registration_number: regnr, id: erpId, model_year: bil.model_year,
@@ -2215,7 +2310,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2PayloadF + '\n');
           log('[easy->v2] Matet shadow (fallback) for ' + regnr);
         } catch (eFeedF) { logErr('easy->v2 feed fallback', eFeedF); }
-        log('--- ' + regnr + ' ferdig (FALLBACK) | ERP: ' + (erpWrittenF ? 'OK' : 'FEIL') + ' ---');
+        log('--- ' + regnr + ' ferdig (FALLBACK) | ERP: ' + (abArm.writeArm(erpId) === 'B' ? 'skrives av B' : (erpWrittenF ? 'OK' : 'FEIL')) + ' ---');
       } catch (eFb) {
         logErr('fallback ' + regnr, eFb);
         { const mc = buildManualCard(regnr, erpId, bil, vegData, 'Finn-fallback feilet: ' + (eFb.message || eFb)); await sendTelegram(mc.text, mc.kb); }
@@ -2232,12 +2327,14 @@ async function evalCar(bil, page, cache, opts = {}) {
       ? (v2.anchor.valgte_comps || []).map(c => ({ price: Number(c.price) || 0 })).filter(c => c.price > 0)
       : [];
     const valuation = calcValuation(anchor.price, seg.segment, _filterOldComps(compCapPool, 6));
-    applyFossefallShadow(valuation, {
+    applyFossefallShadow(valuation, fossefallCtx({
       finnUtpris: anchor.price,
       km: originKm != null ? originKm : bil.mileage,
       modelYear: bil.model_year || (vegData && vegData.firstRegYear),
       bilInfo: fossefallBilInfo(bil, vegData),
-    });
+      soldForhandler: (v2 && v2.soldForhandler) || [],
+      soldPrivat: (v2 && v2.soldPrivat) || [],
+    }));
 
     // 6. Brreg
     const brreg = await checkBrreg(regnr, page);
@@ -2287,7 +2384,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     // 8. Skriv til ERP
     if (await stopIfPrisManuelt(valuation, regnr, erpId)) return;
     if (await _maybeBlock({ sdComment: sdComment, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: (v2 && v2.anchor && v2.anchor.valgte_comps) || [], segConfidence: seg && seg.confidence, dLav: valuation.dLav, dHoy: valuation.dHoy })) return;
-    const erpWritten = await maybeWriteToERP(bil, erpId, valuation.dLav, valuation.dHoy, valuation.auctionTypeId, brreg.anyDebts, brreg, token);
+    const erpWritten = await writeErpForArm(bil, erpId, valuation, brreg.anyDebts, brreg, token);
 
     // 9. Verifiser ERP
     const erpVerify = await maybeVerifyErp(bil, erpId, token);
@@ -2313,6 +2410,7 @@ async function evalCar(bil, page, cache, opts = {}) {
       soldForhandler: (v2.soldForhandler || []), soldPrivat: (v2.soldPrivat || []),
       prevEvals: getPrevEvals(regnr, erpId),
       erpWritten, erpVerify, chatPosted: false, qaOverride: !!qaOverrideUrl,
+      writeArm: abArm.writeArm(erpId),
       kmOverride,
     };
     const erpText = formatEvalCardHybrid(cardParams, true);
@@ -2364,9 +2462,9 @@ async function evalCar(bil, page, cache, opts = {}) {
 
 
     // 12. Cache
-    if (erpWritten) addToCache(cache, erpId);
+    maybeAddPricedCache(cache, erpId, valuation, erpWritten, chatPosted);
 
-    log(`--- ${regnr} ferdig | ERP: ${erpWritten ? 'OK' : 'FEIL'} | Chat: ${chatPosted ? 'OK' : 'skip'} ---`);
+    log('--- ' + regnr + ' ferdig | ERP: ' + (abArm.writeArm(erpId) === 'B' ? 'skrives av B' : (erpWritten ? 'OK' : 'FEIL')) + ' | Chat: ' + (chatPosted ? 'OK' : 'skip') + ' ---');
 
   } catch (err) {
     logErr(`evalCar ${regnr}`, err);
@@ -2434,7 +2532,8 @@ async function checkFlushWatch(cache) {
 }
 
 async function pushPulseStatus(biler, cache) {
-  const venter = (biler || []).filter(b => !cache[b.id]).length;
+  const tablesOn = fossefall.tablesLive();
+  const venter = (biler || []).filter(b => !abArm.cacheStampComplete(cache[String(b.id)] || cache[b.id], tablesOn)).length;
   const rec = { liste3: (biler || []).length, venter: venter, timestamp: new Date().toISOString() };
   const TOKEN = process.env.GITHUB_TOKEN;
   if (!TOKEN) { log('pulse-status: GITHUB_TOKEN mangler i .env'); return; }
@@ -2616,28 +2715,33 @@ async function pollTelegramCommands(cache) {
           try {
             // Ingen comp-cap ved manuell overstyring — tom pool gir ren spread fra ditt anker
             const nyVal = calcValuation(nyAnker, d.segment, []);
-            applyFossefallShadow(nyVal, {
+            applyFossefallShadow(nyVal, fossefallCtx({
               finnUtpris: nyAnker,
               km: d.bil && d.bil.mileage,
               modelYear: d.bil && d.bil.model_year,
               bilInfo: fossefallBilInfo(d.bil, null),
-            });
+            }));
             if (nyVal.pris_manuelt) {
-              await sendTelegram('PRIS MANUELT ' + aRegnr + ': ' + (nyVal.pris_manuelt_grunn || 'tom celle') + ' — ERP ikke oppdatert.');
+              const blockPm = fossefall.formatFossefallBlock(nyVal);
+              await sendTelegram('PRIS MANUELT ' + aRegnr + ': ' + (nyVal.pris_manuelt_grunn || 'tom celle') + ' — ERP ikke oppdatert.' + (blockPm ? ('\n\n' + blockPm) : ''));
               continue;
             }
             const tok = await getErpToken();
-            await writeToERP(aId, nyVal.dLav, nyVal.dHoy, nyVal.auctionTypeId, d.anyDebts, d.brreg, tok);
+            const armEdit = logErpBand(nyVal, aId);
+            if (armEdit === 'A') {
+              await writeToERP(aId, nyVal.dLav, nyVal.dHoy, nyVal.auctionTypeId, d.anyDebts, d.brreg, tok);
+            }
             try { await pushEasyOverride(aRegnr, aId, nyAnker, nyVal); } catch (eOv) { logErr('pushEasyOverride', eOv); }
             const kalkyle = formatKalkyleBlock(nyVal, nyAnker);
+            const fosseBlock = fossefall.formatFossefallBlock(nyVal);
             const nowStr = new Date().toLocaleString('nb-NO', { timeZone: 'Europe/Oslo' });
-            const fullKortTekst = `🔄 ENDRE ANKER ${aRegnr} — ${nowStr}\n\n${kalkyle}`;
+            const fullKortTekst = `🔄 ENDRE ANKER ${aRegnr} — ${nowStr}\n\n${fosseBlock ? fosseBlock + '\n\n' : ''}${kalkyle}`;
             try {
               await maybePostToChat(d.bil, aId, fullKortTekst, tok);
               log(`Endre anker ${aRegnr}: ERP-kommentar skrevet`);
             } catch(eC) { logErr('editanchor postToChat', eC); }
             await sendTelegram(
-              `${fullKortTekst}\n\n✅ ERP oppdatert + dokumentert. Klar til sending.`,
+              `${fullKortTekst}\n\n${armEdit === 'A' ? '✅ ERP oppdatert + dokumentert. Klar til sending.' : 'ERP: skrives av B — Easy oppdaterte ikke budet. Fossefall-kortet er med for QA.'}`,
               { inline_keyboard: [[
                 { text: '✅ Send eval', callback_data: `confirm:${aId}` },
                 { text: '✏️ Endre anker', callback_data: `editanchor:${aId}` }, { text: '🗑 Slett cache', callback_data: `delcache:${aId}` }
