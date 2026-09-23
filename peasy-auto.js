@@ -1390,6 +1390,7 @@ function applyFossefallShadow(valuation, ctx) {
     grunn: (built && built.grunn) || (v2 && v2.grunn) || null,
     price_id: (v2 && v2.price_id) || (built && built.price_id) || null,
     km_id: (v2 && v2.km_id) || (built && built.km_id) || null,
+    celleId: (v2 && (v2.celleId || (v2.a && v2.a.celleId))) || (built && built.celleId) || null,
     legacy_dLav: legacyLav,
     legacy_dHoy: legacyHoy,
     estimertPeasyBud: midOf(v2 && v2.a),
@@ -1408,6 +1409,7 @@ function applyFossefallShadow(valuation, ctx) {
     grunn: v2.grunn || null,
     price_id: v2.price_id || null,
     km_id: v2.km_id || null,
+    celleId: v2.celleId || (v2.a && v2.a.celleId) || null,
     engine: v2.engine || 'fossefallSatser',
   } : null;
   if (built && built.tables_live && built.a && !built.a.skip && Number.isFinite(Number(built.a.lav)) && Number.isFinite(Number(built.a.hoy))) {
@@ -1426,6 +1428,7 @@ function applyFossefallShadow(valuation, ctx) {
   }
   const s = valuation.fossefall_shadow;
   log('fossefall ' + fossefall.FOSSEFALL_VERSION + ' ' + s.engine + ' live=' + s.tables_live
+    + ' celle ' + (s.celleId || '—')
     + ' midt ' + s.estimertPeasyBud + ' lav/hoy ' + s.a_lav + '/' + s.a_hoy
     + ' A=B=Ordna ' + (s.a_mid != null && s.a_mid === s.b_mid && s.b_mid === s.ordna_mid)
     + (s.grunn ? ' (' + s.grunn + ')' : '')

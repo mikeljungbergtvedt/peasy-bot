@@ -1,9 +1,11 @@
 'use strict';
 /**
- * fossefall.js — v20.144
+ * fossefall.js — v20.145
  * Delbeløp i kroner. Ingen X-faktor.
  * usikkerhet_takst (alias spenn). returtrekk fjernet (var alias/dobbeltbokføring).
  *
+ * v20.145: etter midt og Spenn ned|opp rundes midt, lav og høy til nærmeste 1000 kr (half up).
+ * Vrakpant-gulv kommer etter den avrundingen. celleId = prisbånd|kmbånd (Pulse-aksene).
  * v20.144: ett tall, så ett spenn, så profil som merkelapp.
  * Finn → margin → takst → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
  * Spenn-tabellens ned|opp legges rundt den samme midten → lav/høy.
@@ -14,7 +16,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.144';
+const FOSSEFALL_VERSION = 'v20.145';
 
 /** Merkelapp for Softteam. Ingen multiplikator — alle armer deler én midt og ett spenn. */
 const PROFILES = {
@@ -112,8 +114,20 @@ function segmentModifier(ctx) {
   return { mult: 1.0, tag: 'standard', regel: null };
 }
 
+/**
+ * Nærmeste 1000 kr, half up.
+ * Halvparten (.5) rundes mot +∞, samme som ECMAScript Math.round.
+ * For positive kroner: rest ≥ 500 rundes opp (113568 → 114000, 113500 → 114000, 113499 → 113000).
+ */
 function roundKr(n) {
   return Math.round(Number(n) / 1000) * 1000;
+}
+
+function celleIdOf(looked) {
+  if (!looked) return null;
+  if (looked.cell) return looked.cell;
+  if (looked.priceId && looked.kmId) return looked.priceId + '|' + looked.kmId;
+  return null;
 }
 
 function sideOf(v, side) {
@@ -717,7 +731,13 @@ function computeSharedFossefall(opts) {
   const finn = roundKr(finnIn);
   const satser = opts.satser || getFossefallSatser();
   const looked = opts.looked || lookupFossefallCell(satser, finn, km);
-  if (!looked || !looked.ok) return skipArm(prof.id, (looked && looked.grunn) || 'satser ikke lastet');
+  if (!looked || !looked.ok) {
+    const skipped = skipArm(prof.id, (looked && looked.grunn) || 'satser ikke lastet');
+    skipped.celleId = celleIdOf(looked);
+    if (looked && looked.priceId) skipped.price_id = looked.priceId;
+    if (looked && looked.kmId) skipped.km_id = looked.kmId;
+    return skipped;
+  }
 
   const modelYear = Number(opts.modelYear) || Number(opts.year) || Number(opts.bilInfo && opts.bilInfo.year) || 2020;
   const bilInfo = Object.assign({ year: modelYear }, opts.bilInfo || {});
@@ -733,10 +753,13 @@ function computeSharedFossefall(opts) {
   const arBud = finn - margin - takst - omregKr - KLARGJORING_KR;
   const fee = peasyFee(arBud);
   const midRaw = arBud - fee;
-  const peasyBudMid = Math.round(midRaw);
-
-  const lav = peasyBudMid - ned + statidKr;
-  const hoy = peasyBudMid + opp + statidKr;
+  // Ståtid ligger i lav/høy (ikke i midten) før tusen-avrunding. Vrakpant kommer etterpå.
+  const lavRaw = midRaw - ned + statidKr;
+  const hoyRaw = midRaw + opp + statidKr;
+  const peasyBudMid = roundKr(midRaw);
+  const lav = roundKr(lavRaw);
+  const hoy = roundKr(hoyRaw);
+  const celleId = celleIdOf(looked);
 
   const originCapInfo = opts.originCapInfo || null;
   const origin_cap = (originCapInfo && Number(originCapInfo.kr)) || 0;
@@ -749,6 +772,7 @@ function computeSharedFossefall(opts) {
     profil: prof.label,
     price_id: looked.priceId,
     km_id: looked.kmId,
+    celleId,
     ar_bud: arBud,
     estimertPeasyBud: peasyBudMid,
     peasy_bud_mid: peasyBudMid,
@@ -773,7 +797,7 @@ function computeSharedFossefall(opts) {
     forhandlermargin_tillegg_bud: emptySide(),
     ordna_trekk: emptySide(),
     vrakpant_gulv: emptySide(),
-    avrunding: { lav: 0, hoy: 0 },
+    avrunding: { lav: lav - lavRaw, hoy: hoy - hoyRaw },
     peasy_avgift: { lav: -fee, hoy: -fee },
     lav,
     hoy,
@@ -781,6 +805,7 @@ function computeSharedFossefall(opts) {
       engine: 'fossefallSatser',
       version: FOSSEFALL_VERSION,
       cell: looked.cell,
+      celleId,
       marginRaw,
       margin,
       takst,
@@ -788,6 +813,8 @@ function computeSharedFossefall(opts) {
       opp,
       arBud,
       midRaw,
+      lavRaw,
+      hoyRaw,
       peasyBudMid,
       fee,
       omregKr,
@@ -824,10 +851,19 @@ function buildSharedFossefall(opts) {
   const looked = lookupFossefallCell(satser, roundKr(finn), km);
   if (!looked.ok) {
     const grunn = looked.grunn || 'satser ikke lastet';
+    const celleId = celleIdOf(looked);
+    const stamp = (profile) => {
+      const arm = skipArm(profile, grunn);
+      arm.celleId = celleId;
+      if (looked.priceId) arm.price_id = looked.priceId;
+      if (looked.kmId) arm.km_id = looked.kmId;
+      return arm;
+    };
     return {
-      a: skipArm('a', grunn), b: skipArm('b', grunn), ordna: skipArm('ordna', grunn),
+      a: stamp('a'), b: stamp('b'), ordna: stamp('ordna'),
       pris_manuelt: true, signal: 'PRIS MANUELT', grunn, engine: 'fossefallSatser',
       price_id: looked.priceId || null, km_id: looked.kmId || null,
+      celleId,
     };
   }
 
@@ -853,6 +889,9 @@ function buildSharedFossefall(opts) {
     return {
       a: aRaw, b: bRaw, ordna: oRaw,
       pris_manuelt: true, signal: 'PRIS MANUELT', grunn, engine: 'fossefallSatser',
+      price_id: looked.priceId || null,
+      km_id: looked.kmId || null,
+      celleId: celleIdOf(looked) || aRaw.celleId || null,
     };
   }
 
@@ -897,6 +936,7 @@ function buildSharedFossefall(opts) {
     hoy: a.hoy,
     price_id: looked.priceId,
     km_id: looked.kmId,
+    celleId: looked.cell,
     version: FOSSEFALL_VERSION,
   };
 }
@@ -1016,6 +1056,7 @@ function buildFossefall(opts) {
       grunn: shared.grunn || (shared.a && shared.a.grunn) || 'PRIS MANUELT',
       price_id: shared.price_id || null,
       km_id: shared.km_id || null,
+      celleId: shared.celleId || (shared.a && shared.a.celleId) || null,
       version: FOSSEFALL_VERSION,
     };
   }
@@ -1054,6 +1095,7 @@ module.exports = {
     computeStatid,
     extractSoldDays,
     finalizeAvrunding,
+    roundKr,
     ORDNA_KALKYLE_MULT,
     V3G_RETUR_MULT,
     buildLegacyFossefall,
