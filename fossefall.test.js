@@ -111,14 +111,26 @@ assert.strictEqual(a.avsetning_takst, o.avsetning_takst);
 assert.strictEqual(a.omregistrering, b.omregistrering);
 assert.strictEqual(a.peasy_avgift.lav, b.peasy_avgift.lav);
 assert.strictEqual(a.peasy_avgift.lav, o.peasy_avgift.lav);
-assert.ok(o.peasy_bud_mid < b.peasy_bud_mid && b.peasy_bud_mid < a.peasy_bud_mid,
-  'Ordna mid ' + o.peasy_bud_mid + ' < B ' + b.peasy_bud_mid + ' < A ' + a.peasy_bud_mid);
-assert.strictEqual(a.profil_mult, 1);
-assert.strictEqual(b.profil_mult, 0.9);
-assert.strictEqual(o.profil_mult, 0.75);
+assert.strictEqual(a.peasy_bud_mid, b.peasy_bud_mid);
+assert.strictEqual(b.peasy_bud_mid, o.peasy_bud_mid);
+assert.strictEqual(a.estimertPeasyBud, a.peasy_bud_mid);
+assert.strictEqual(b.estimertPeasyBud, a.estimertPeasyBud);
+assert.strictEqual(o.estimertPeasyBud, a.estimertPeasyBud);
+assert.strictEqual(a.profile, 'a');
+assert.strictEqual(b.profile, 'b');
+assert.strictEqual(o.profile, 'ordna');
+assert.strictEqual(a.profil_mult, undefined);
 assert.strictEqual(a.peasy_bud_mid, Math.round(a.ar_bud + a.peasy_avgift.lav));
-assert.strictEqual(b.peasy_bud_mid, Math.round(a.peasy_bud_mid * 0.9));
-assert.strictEqual(o.peasy_bud_mid, Math.round(a.peasy_bud_mid * 0.75));
+assert.strictEqual(a.lav, a.peasy_bud_mid - 20000);
+assert.strictEqual(a.hoy, a.peasy_bud_mid + 13000);
+assert.strictEqual(b.lav, a.lav);
+assert.strictEqual(o.lav, a.lav);
+assert.strictEqual(b.hoy, a.hoy);
+assert.strictEqual(o.hoy, a.hoy);
+assert.deepStrictEqual(b.forhandlermargin_tillegg_bud, { lav: 0, hoy: 0 });
+assert.deepStrictEqual(o.ordna_trekk, { lav: 0, hoy: 0 });
+const notAScale = ff.computeSharedFossefall(Object.assign(ctx(), { profile: 0.75 }));
+assert.strictEqual(notAScale.skip, true);
 
 // Tom celle: ingen nabo, ingen autoflyt
 const empty = JSON.parse(JSON.stringify(satser));
@@ -147,8 +159,11 @@ assert.strictEqual(shadow.tables_live, false);
 assert.strictEqual(shadow.engine, 'hardcoded');
 assert.strictEqual(shadow.a.klargjoring, -5000);
 assert.strictEqual(shadow.fossefall_v2.a.klargjoring, -1000);
-assert.ok(shadow.fossefall_v2.ordna.peasy_bud_mid < shadow.fossefall_v2.b.peasy_bud_mid);
-assert.ok(shadow.fossefall_v2.b.peasy_bud_mid < shadow.fossefall_v2.a.peasy_bud_mid);
+assert.strictEqual(shadow.fossefall_v2.a.peasy_bud_mid, shadow.fossefall_v2.b.peasy_bud_mid);
+assert.strictEqual(shadow.fossefall_v2.b.peasy_bud_mid, shadow.fossefall_v2.ordna.peasy_bud_mid);
+assert.strictEqual(shadow.fossefall_v2.estimertPeasyBud, shadow.fossefall_v2.a.peasy_bud_mid);
+assert.strictEqual(shadow.fossefall_v2.a.lav, shadow.fossefall_v2.b.lav);
+assert.strictEqual(shadow.fossefall_v2.b.hoy, shadow.fossefall_v2.ordna.hoy);
 assert.strictEqual(ff.verifyLag(shadow.a).ok, true, JSON.stringify(ff.verifyLag(shadow.a)));
 assert.strictEqual(ff.verifyLag(shadow.fossefall_v2.a).ok, true, JSON.stringify(ff.verifyLag(shadow.fossefall_v2.a)));
 assert.strictEqual(ff.verifyLag(shadow.fossefall_v2.b).ok, true, JSON.stringify(ff.verifyLag(shadow.fossefall_v2.b)));
@@ -162,7 +177,13 @@ assert.strictEqual(live.engine, 'fossefallSatser');
 assert.strictEqual(live.a.klargjoring, -1000);
 assert.strictEqual(live.b.klargjoring, -1000);
 assert.strictEqual(live.ordna.klargjoring, -1000);
-assert.ok(live.ordna.peasy_bud_mid < live.b.peasy_bud_mid && live.b.peasy_bud_mid < live.a.peasy_bud_mid);
+assert.strictEqual(live.a.peasy_bud_mid, live.b.peasy_bud_mid);
+assert.strictEqual(live.b.peasy_bud_mid, live.ordna.peasy_bud_mid);
+assert.strictEqual(live.estimertPeasyBud, live.a.peasy_bud_mid);
+assert.strictEqual(live.a.lav, live.b.lav);
+assert.strictEqual(live.a.hoy, live.ordna.hoy);
+assert.strictEqual(live.lav, live.a.lav);
+assert.strictEqual(live.hoy, live.a.hoy);
 assert.strictEqual(ff.verifyLag(live.a).ok, true, JSON.stringify(ff.verifyLag(live.a)));
 assert.ok(live.a.lav >= 3000 && live.a.hoy >= 5000);
 assert.notStrictEqual(live.a.lav, 0);
@@ -206,16 +227,21 @@ assert.notStrictEqual(low.b.lav, 0);
 assert.notStrictEqual(low.ordna.lav, 0);
 assert.strictEqual(ff.verifyLag(low.a).ok, true, JSON.stringify(ff.verifyLag(low.a)));
 
-// Ståtid bare på A, etter fee, og den kan ligge over margin-maks (ingen ny klemme).
+// Ståtid inngår i det ene estimatet (alle armer like). Den klemmes ikke inn i margin-maks.
 const stood = ff.buildFossefall(Object.assign(ctx(), {
   statidLive: true,
   soldDays: [40, 40, 40, 40, 40, 40],
 }));
 assert.ok(stood.a.statid < 0, 'statid ' + stood.a.statid);
-assert.strictEqual(stood.b.statid, 0);
-assert.strictEqual(stood.ordna.statid, 0);
+assert.strictEqual(stood.b.statid, stood.a.statid);
+assert.strictEqual(stood.ordna.statid, stood.a.statid);
+assert.strictEqual(stood.a.peasy_bud_mid, stood.b.peasy_bud_mid);
+assert.strictEqual(stood.b.peasy_bud_mid, stood.ordna.peasy_bud_mid);
+assert.strictEqual(stood.a.lav, stood.b.lav);
+assert.strictEqual(stood.a.hoy, stood.ordna.hoy);
 assert.strictEqual(stood.a.forhandlermargin, -38000);
 assert.strictEqual(ff.verifyLag(stood.a).ok, true, JSON.stringify(ff.verifyLag(stood.a)));
+assert.strictEqual(ff.verifyLag(stood.b).ok, true, JSON.stringify(ff.verifyLag(stood.b)));
 assert.ok(stood.a.lav < live.a.lav);
 
 delete process.env.FOSSEFALL_TABLES_LIVE;
@@ -239,7 +265,7 @@ delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
   assert.strictEqual(calls, 1);
   ff._internal.resetSatserCache();
   console.log('fossefall.test.js ok');
-  console.log('  A/B/Ordna mid', a.peasy_bud_mid, b.peasy_bud_mid, o.peasy_bud_mid);
+  console.log('  én midt', a.peasy_bud_mid, 'lav/hoy', a.lav, a.hoy);
 })().catch((err) => {
   console.error(err);
   process.exit(1);

@@ -50,7 +50,7 @@ const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 const originCvLib = require('./origin-cv');
 const fossefall = require('./fossefall');
 
-const VERSION = 'v20.79';
+const VERSION = 'v20.80';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1392,6 +1392,7 @@ function applyFossefallShadow(valuation, ctx) {
     km_id: (v2 && v2.km_id) || (built && built.km_id) || null,
     legacy_dLav: legacyLav,
     legacy_dHoy: legacyHoy,
+    estimertPeasyBud: midOf(v2 && v2.a),
     a_mid: midOf(v2 && v2.a),
     b_mid: midOf(v2 && v2.b),
     ordna_mid: midOf(v2 && v2.ordna),
@@ -1425,7 +1426,8 @@ function applyFossefallShadow(valuation, ctx) {
   }
   const s = valuation.fossefall_shadow;
   log('fossefall ' + fossefall.FOSSEFALL_VERSION + ' ' + s.engine + ' live=' + s.tables_live
-    + ' A/B/Ordna mid ' + s.a_mid + '/' + s.b_mid + '/' + s.ordna_mid
+    + ' midt ' + s.estimertPeasyBud + ' lav/hoy ' + s.a_lav + '/' + s.a_hoy
+    + ' A=B=Ordna ' + (s.a_mid != null && s.a_mid === s.b_mid && s.b_mid === s.ordna_mid)
     + (s.grunn ? ' (' + s.grunn + ')' : '')
     + ' legacy ' + legacyLav + '/' + legacyHoy);
   return valuation;
