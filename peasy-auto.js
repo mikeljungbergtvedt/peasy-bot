@@ -48,8 +48,9 @@ const { runV2Pricing, collectOnly } = require('./pricing-v2-glue');
 const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 const originCvLib = require('./origin-cv');
+const fossefall = require('./fossefall');
 
-const VERSION = 'v20.78';
+const VERSION = 'v20.79';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1284,6 +1285,14 @@ async function fetchBrackets() {
     logErr('fetchBrackets: bruker PDEC1 fallback', e);
     _brackets = null;
   }
+  try {
+    const satser = await fossefall.loadFossefallSatser();
+    log(satser
+      ? ('fossefallSatser: lastet ' + (satser.version || '') + ' (' + (satser.status || 'uten status') + ')')
+      : 'fossefallSatser: ikke lastet — ny motor feiler lukket');
+  } catch (e) {
+    logErr('fossefallSatser', e);
+  }
 }
 
 function getRecX(dMid) {
@@ -1347,6 +1356,89 @@ function easyKalkyle(anker) {
     dHoy: Math.round(dHoy / 1000) * 1000,
     model: 'easy-data-v1'
   };
+}
+
+function fossefallBilInfo(bil, vegData) {
+  const avg = (vegData && (vegData.avgiftsgruppe || vegData.karosseri)) || (bil && bil.karosseri_erp) || '';
+  return {
+    year: (bil && bil.model_year) || (vegData && vegData.firstRegYear) || undefined,
+    egenvekt: (bil && bil.egenvekt) || undefined,
+    biltype: avg,
+    isVarebil: /varebil|lastebil|kombinert|campingbil/i.test(String(avg)),
+  };
+}
+
+// Shadow alltid. Live ERP-bud byttes bare når FOSSEFALL_TABLES_LIVE=1.
+// Tom celle / satser nede + live → pris_manuelt, ingen autoflyt.
+function applyFossefallShadow(valuation, ctx) {
+  if (!valuation) return valuation;
+  const legacyLav = valuation.dLav;
+  const legacyHoy = valuation.dHoy;
+  let built = null;
+  try {
+    built = fossefall.buildFossefall(ctx || {});
+  } catch (e) {
+    logErr('fossefall', e);
+    return valuation;
+  }
+  const v2 = built && built.fossefall_v2;
+  const midOf = (arm) => (arm && !arm.skip && arm.peasy_bud_mid != null) ? arm.peasy_bud_mid : null;
+  valuation.fossefall_shadow = {
+    version: fossefall.FOSSEFALL_VERSION,
+    tables_live: !!(built && built.tables_live),
+    engine: built && built.engine,
+    grunn: (built && built.grunn) || (v2 && v2.grunn) || null,
+    price_id: (v2 && v2.price_id) || (built && built.price_id) || null,
+    km_id: (v2 && v2.km_id) || (built && built.km_id) || null,
+    legacy_dLav: legacyLav,
+    legacy_dHoy: legacyHoy,
+    a_mid: midOf(v2 && v2.a),
+    b_mid: midOf(v2 && v2.b),
+    ordna_mid: midOf(v2 && v2.ordna),
+    a_lav: v2 && v2.a ? v2.a.lav : null,
+    a_hoy: v2 && v2.a ? v2.a.hoy : null,
+    klargjoring: v2 && v2.a ? v2.a.klargjoring : null,
+  };
+  valuation.fossefall_v2 = v2 ? {
+    a: v2.a,
+    b: v2.b,
+    ordna: v2.ordna,
+    pris_manuelt: !!v2.pris_manuelt,
+    grunn: v2.grunn || null,
+    price_id: v2.price_id || null,
+    km_id: v2.km_id || null,
+    engine: v2.engine || 'fossefallSatser',
+  } : null;
+  if (built && built.tables_live && built.a && !built.a.skip && Number.isFinite(Number(built.a.lav)) && Number.isFinite(Number(built.a.hoy))) {
+    valuation.dLav = built.a.lav;
+    valuation.dHoy = built.a.hoy;
+    valuation.auctionTypeId = valuation.dLav <= 35000 ? 2 : 1;
+    valuation.model = 'fossefall-satser';
+    valuation.margin = Math.abs(Number(built.a.forhandlermargin) || 0);
+    const fee = built.a.peasy_avgift && built.a.peasy_avgift.lav;
+    if (fee != null && Number.isFinite(Number(fee))) valuation.fee = Math.abs(Number(fee));
+  } else if (built && built.tables_live && (built.pris_manuelt || (built.a && built.a.skip))) {
+    valuation.pris_manuelt = true;
+    valuation.pris_manuelt_grunn = built.grunn || (built.a && built.a.grunn) || 'PRIS MANUELT';
+    valuation.dLav = null;
+    valuation.dHoy = null;
+  }
+  const s = valuation.fossefall_shadow;
+  log('fossefall ' + fossefall.FOSSEFALL_VERSION + ' ' + s.engine + ' live=' + s.tables_live
+    + ' A/B/Ordna mid ' + s.a_mid + '/' + s.b_mid + '/' + s.ordna_mid
+    + (s.grunn ? ' (' + s.grunn + ')' : '')
+    + ' legacy ' + legacyLav + '/' + legacyHoy);
+  return valuation;
+}
+
+async function stopIfPrisManuelt(valuation, regnr, erpId) {
+  if (!valuation || !valuation.pris_manuelt) return false;
+  const grunn = valuation.pris_manuelt_grunn || 'PRIS MANUELT';
+  log('PRIS MANUELT ' + regnr + ': ' + grunn);
+  try {
+    await sendTelegram('PRIS MANUELT ' + regnr + ' (ERP ' + erpId + '): ' + grunn + '\nFossefall-tabell er live og cellen kan ikke prises — ingen autoflyt.');
+  } catch (e) { logErr('pris-manuelt', e); }
+  return true;
 }
 
 function calcValuation(anchorPrice, segment, pool) {
@@ -2074,6 +2166,12 @@ async function evalCar(bil, page, cache, opts = {}) {
         const anchorF = getAnchor(poolF, segF);
         if (finnSelf && Number(finnSelf.price) > 0) { var _adCap = Math.round(Number(finnSelf.price) * 0.95); if (anchorF.price > _adCap) { anchorF.price = _adCap; anchorF.reason = (anchorF.reason || '') + ' | cap: selgers Finn-annonse x0.95 = ' + _adCap.toLocaleString('nb-NO') + ' kr'; } } // finncap
         const valuationF = calcValuation(anchorF.price, segF.segment, poolF);
+        applyFossefallShadow(valuationF, {
+          finnUtpris: anchorF.price,
+          km: originKm != null ? originKm : bil.mileage,
+          modelYear: bil.model_year || (vegData && vegData.firstRegYear),
+          bilInfo: fossefallBilInfo(bil, vegData),
+        });
         const brregF = await checkBrreg(regnr, page);
         const tokenF = await getErpToken();
         let sdCommentF = null, imageCountF = 0;
@@ -2082,6 +2180,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           sdCommentF = (detF && detF.car && detF.car.self_declaration && detF.car.self_declaration.comment) || (detF && detF.car && detF.car.description) || null;
           imageCountF = (detF && detF.car && Array.isArray(detF.car.files)) ? detF.car.files.length : 0;
         } catch (eDf) {}
+        if (await stopIfPrisManuelt(valuationF, regnr, erpId)) return;
         if (await _maybeBlock({ sdComment: sdCommentF, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: poolF, segConfidence: segF && segF.confidence, dLav: valuationF.dLav, dHoy: valuationF.dHoy })) return;
         const erpWrittenF = await maybeWriteToERP(bil, erpId, valuationF.dLav, valuationF.dHoy, valuationF.auctionTypeId, brregF.anyDebts, brregF, tokenF);
         const erpVerifyF = await maybeVerifyErp(bil, erpId, tokenF);
@@ -2106,7 +2205,7 @@ async function evalCar(bil, page, cache, opts = {}) {
             mileage: originCv.km != null ? originCv.km : bil.mileage, model_series: bil.model_series,
             make: vegData ? vegData.make : (bil.make || ''),
             origin_cv: originCv,
-            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: easyConfidence, begrunnelse_kort: easyBegr, anker_kilde: 'finn', km_override: kmOverride }
+            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: easyConfidence, begrunnelse_kort: easyBegr, anker_kilde: 'finn', km_override: kmOverride, fossefall: valuationF.fossefall_shadow || null }
           });
           fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2PayloadF + '\n');
           log('[easy->v2] Matet shadow (fallback) for ' + regnr);
@@ -2128,6 +2227,12 @@ async function evalCar(bil, page, cache, opts = {}) {
       ? (v2.anchor.valgte_comps || []).map(c => ({ price: Number(c.price) || 0 })).filter(c => c.price > 0)
       : [];
     const valuation = calcValuation(anchor.price, seg.segment, _filterOldComps(compCapPool, 6));
+    applyFossefallShadow(valuation, {
+      finnUtpris: anchor.price,
+      km: originKm != null ? originKm : bil.mileage,
+      modelYear: bil.model_year || (vegData && vegData.firstRegYear),
+      bilInfo: fossefallBilInfo(bil, vegData),
+    });
 
     // 6. Brreg
     const brreg = await checkBrreg(regnr, page);
@@ -2175,6 +2280,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     } catch (e) { logErr('getErpCarDetail', e); }
 
     // 8. Skriv til ERP
+    if (await stopIfPrisManuelt(valuation, regnr, erpId)) return;
     if (await _maybeBlock({ sdComment: sdComment, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: (v2 && v2.anchor && v2.anchor.valgte_comps) || [], segConfidence: seg && seg.confidence, dLav: valuation.dLav, dHoy: valuation.dHoy })) return;
     const erpWritten = await maybeWriteToERP(bil, erpId, valuation.dLav, valuation.dHoy, valuation.auctionTypeId, brreg.anyDebts, brreg, token);
 
@@ -2244,7 +2350,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           mileage: originCv.km != null ? originCv.km : bil.mileage, model_series: bil.model_series,
           make: vegData ? vegData.make : (bil.make || ''),
           origin_cv: originCv,
-          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride }
+          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride, fossefall: (valuation && valuation.fossefall_shadow) || null }
         });
         fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2Payload + '\n');
         log('[easy->v2] Matet shadow for ' + regnr);
@@ -2505,6 +2611,16 @@ async function pollTelegramCommands(cache) {
           try {
             // Ingen comp-cap ved manuell overstyring — tom pool gir ren spread fra ditt anker
             const nyVal = calcValuation(nyAnker, d.segment, []);
+            applyFossefallShadow(nyVal, {
+              finnUtpris: nyAnker,
+              km: d.bil && d.bil.mileage,
+              modelYear: d.bil && d.bil.model_year,
+              bilInfo: fossefallBilInfo(d.bil, null),
+            });
+            if (nyVal.pris_manuelt) {
+              await sendTelegram('PRIS MANUELT ' + aRegnr + ': ' + (nyVal.pris_manuelt_grunn || 'tom celle') + ' — ERP ikke oppdatert.');
+              continue;
+            }
             const tok = await getErpToken();
             await writeToERP(aId, nyVal.dLav, nyVal.dHoy, nyVal.auctionTypeId, d.anyDebts, d.brreg, tok);
             try { await pushEasyOverride(aRegnr, aId, nyAnker, nyVal); } catch (eOv) { logErr('pushEasyOverride', eOv); }
