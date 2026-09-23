@@ -1,22 +1,24 @@
 'use strict';
 /**
- * fossefall.js — v20.145
+ * fossefall.js — v20.146
  * Delbeløp i kroner. Ingen X-faktor.
  * usikkerhet_takst (alias spenn). returtrekk fjernet (var alias/dobbeltbokføring).
  *
- * v20.145: etter midt og Spenn ned|opp rundes midt, lav og høy til nærmeste 1000 kr (half up).
- * Vrakpant-gulv kommer etter den avrundingen. celleId = prisbånd|kmbånd (Pulse-aksene).
+ * v20.146: ståtid inngår i den ene peasy-bud-midten (ikke bare som skift på lav/høy).
+ * Midt rundes til hele 1000 først (half up). Lav/høy = den midten ∓ spenn.
+ * Deretter vrakpant-gulv på midt, lav og høy. AR-bud ≤ 0 er ikke PRIS MANUELT.
+ * celleId = prisbånd|kmbånd (Pulse-aksene).
  * v20.144: ett tall, så ett spenn, så profil som merkelapp.
  * Finn → margin → takst → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
  * Spenn-tabellens ned|opp legges rundt den samme midten → lav/høy.
  * A / B / Ordna viser den samme midten og det samme intervallet. De skalerer ikke (ikke ×1.00 / ×0.90 / ×0.75).
- * STATID_A_LIVE (default på): ståtid inngår i det ene estimatet og kopieres til alle armer. Den klemmes ikke av margin-maks.
+ * STATID_A_LIVE (default på): ståtid inngår i peasy-bud-midt og kopieres til alle armer. Den klemmes ikke av margin-maks.
  * FOSSEFALL_TABLES_LIVE=1: a/b/ordna kommer fra tabellene.
  * Default (flagget av): gammel computeA/computeBand blir stående; ny motor ligger i fossefall_v2.
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.145';
+const FOSSEFALL_VERSION = 'v20.146';
 
 /** Merkelapp for Softteam. Ingen multiplikator — alle armer deler én midt og ett spenn. */
 const PROFILES = {
@@ -158,7 +160,7 @@ function emptySide() {
 }
 
 
-/** Felles gulv for A/B/Ordna: lav ≥ 3000, høy ≥ 5000. Etter alle andre lag. Rad = løftet beløp. */
+/** Felles gulv for A/B/Ordna: midt og lav ≥ 3000, høy ≥ 5000. Etter avrunding. Rad = løftet beløp. */
 const VRAKPANT_GULV_LAV = 3000;
 const VRAKPANT_GULV_HOY = 5000;
 function applyVrakpantGulv(lag) {
@@ -169,12 +171,23 @@ function applyVrakpantGulv(lag) {
     lag.vrakpant_gulv = emptySide();
     return lag;
   }
-  // Bare løft: lav = max(lav, 3000); høy = max(høy, lav+2000, 5000). Aldri negativ rad.
+  // Bare løft: midt og lav ≥ 3000; høy ≥ max(lav+2000, 5000). Aldri PRIS MANUELT fordi tallet var ≤ 0.
   const nLav = Math.max(lav, VRAKPANT_GULV_LAV);
   const nHoy = Math.max(hoy, nLav + 2000, VRAKPANT_GULV_HOY);
   const liftLav = nLav - lav;
   const liftHoy = nHoy - hoy;
-  if (liftLav === 0 && liftHoy === 0) {
+  let midLift = 0;
+  const hasMid = lag.peasy_bud_mid != null || lag.estimertPeasyBud != null;
+  if (hasMid) {
+    const mid = Number(lag.peasy_bud_mid != null ? lag.peasy_bud_mid : lag.estimertPeasyBud);
+    if (Number.isFinite(mid)) {
+      const nMid = Math.max(mid, VRAKPANT_GULV_LAV);
+      midLift = nMid - mid;
+      lag.peasy_bud_mid = nMid;
+      lag.estimertPeasyBud = nMid;
+    }
+  }
+  if (liftLav === 0 && liftHoy === 0 && midLift === 0) {
     lag.vrakpant_gulv = emptySide();
     if (lag._meta) lag._meta.vrakpant = false;
     return lag;
@@ -714,8 +727,9 @@ function skipArm(profile, grunn) {
  * Ett fossefall. Profilen er bare hvilken arm som vises.
  * Finn − forhandlermargin − avsetning takst − omreg − klargjøring 1000 = AR-bud
  * AR-bud − peasyFee = én peasyBud (midt). Ingen profil-skalering.
- * Spenn ned|opp legges rundt den midten → lav/høy.
- * Ståtid (samme beløp på alle armer når den er på) kommer etter fee og klemmes ikke av margin-maks.
+ * Spenn ned|opp legges rundt den avrundede midten → lav/høy.
+ * Ståtid (samme beløp på alle armer når den er på) ligger i midten, etter fee, og klemmes ikke av margin-maks.
+ * Vrakpant-gulv på midt/lav/høy legges på i buildSharedFossefall, etter avrundingen.
  */
 function computeSharedFossefall(opts) {
   opts = opts || {};
@@ -752,13 +766,12 @@ function computeSharedFossefall(opts) {
 
   const arBud = finn - margin - takst - omregKr - KLARGJORING_KR;
   const fee = peasyFee(arBud);
-  const midRaw = arBud - fee;
-  // Ståtid ligger i lav/høy (ikke i midten) før tusen-avrunding. Vrakpant kommer etterpå.
-  const lavRaw = midRaw - ned + statidKr;
-  const hoyRaw = midRaw + opp + statidKr;
+  // Ståtid etter fee, inne i den ene midten. Rund midt først, så lav/høy fra den midten ± spenn.
+  const midRaw = arBud - fee + statidKr;
   const peasyBudMid = roundKr(midRaw);
-  const lav = roundKr(lavRaw);
-  const hoy = roundKr(hoyRaw);
+  const lav = peasyBudMid - ned;
+  const hoy = peasyBudMid + opp;
+  const midAvr = peasyBudMid - midRaw;
   const celleId = celleIdOf(looked);
 
   const originCapInfo = opts.originCapInfo || null;
@@ -797,7 +810,7 @@ function computeSharedFossefall(opts) {
     forhandlermargin_tillegg_bud: emptySide(),
     ordna_trekk: emptySide(),
     vrakpant_gulv: emptySide(),
-    avrunding: { lav: lav - lavRaw, hoy: hoy - hoyRaw },
+    avrunding: { lav: midAvr, hoy: midAvr },
     peasy_avgift: { lav: -fee, hoy: -fee },
     lav,
     hoy,
@@ -813,8 +826,6 @@ function computeSharedFossefall(opts) {
       opp,
       arBud,
       midRaw,
-      lavRaw,
-      hoyRaw,
       peasyBudMid,
       fee,
       omregKr,
@@ -895,12 +906,10 @@ function buildSharedFossefall(opts) {
     };
   }
 
+  // Gulv etter at midt er rundet og lav/høy er midt ± spenn. Ingen ny tusen-runding etter gulvet.
   applyVrakpantGulv(aRaw);
   applyVrakpantGulv(bRaw);
   applyVrakpantGulv(oRaw);
-  finalizeAvrunding(aRaw);
-  finalizeAvrunding(bRaw);
-  finalizeAvrunding(oRaw);
 
   const lagret = opts.lagret || {};
   const hints = opts.hints || {};

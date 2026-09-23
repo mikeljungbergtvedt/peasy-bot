@@ -5,6 +5,9 @@
 const assert = require('assert');
 const ff = require('./fossefall');
 
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.146');
+assert.strictEqual(ff.KLARGJORING_KR, 1000);
+
 const satser = {
   version: 'satser-utkast-v0.1',
   status: 'DRAFT',
@@ -120,7 +123,7 @@ assert.strictEqual(a.profile, 'a');
 assert.strictEqual(b.profile, 'b');
 assert.strictEqual(o.profile, 'ordna');
 assert.strictEqual(a.profil_mult, undefined);
-// 180k×80k: rå midt 113568, lav 93568, høy 126568 → half up til hele tusen.
+// 180k×80k: rå midt 113568 rundes til 114000, deretter spenn 20000|13000.
 assert.strictEqual(ff._internal.roundKr(113500), 114000);
 assert.strictEqual(ff._internal.roundKr(113499), 113000);
 assert.strictEqual(a.peasy_bud_mid, ff._internal.roundKr(a.ar_bud + a.peasy_avgift.lav));
@@ -234,7 +237,8 @@ assert.strictEqual(fb.engine, 'hardcoded-fallback');
 assert.strictEqual(fb.a.klargjoring, -5000);
 assert.strictEqual(fb.pris_manuelt, false);
 
-// Lavt anker der fossen går under gulvet: løft, aldri 0
+// Lavt anker: fossen går under null (AR-bud ≤ 0). Ikke PRIS MANUELT.
+// Midt, lav og høy løftes til vrakpant. Negativ midt med gulvet bare på lav/høy er feil.
 const low = ff.buildFossefall({
   finnUtpris: 12000,
   km: 400000,
@@ -243,12 +247,28 @@ const low = ff.buildFossefall({
   satser,
   statidLive: false,
 });
+assert.ok(low.a.ar_bud <= 0, 'ar ' + low.a.ar_bud);
+assert.strictEqual(low.pris_manuelt, false);
+assert.strictEqual(low.signal, null);
+assert.strictEqual(low.a.skip, false);
+assert.ok(low.a.peasy_bud_mid >= 3000, 'midt ' + low.a.peasy_bud_mid);
+assert.ok(low.a.peasy_bud_mid >= 0, 'midt negativ ' + low.a.peasy_bud_mid);
+assert.ok(low.b.peasy_bud_mid >= 3000, 'b midt ' + low.b.peasy_bud_mid);
+assert.ok(low.ordna.peasy_bud_mid >= 3000, 'ordna midt ' + low.ordna.peasy_bud_mid);
+assert.strictEqual(low.estimertPeasyBud, low.a.peasy_bud_mid);
+assert.strictEqual(low.a.peasy_bud_mid, low.b.peasy_bud_mid);
+assert.strictEqual(low.b.peasy_bud_mid, low.ordna.peasy_bud_mid);
 assert.ok(low.a.lav >= 3000, 'lav ' + low.a.lav);
 assert.ok(low.a.hoy >= 5000, 'hoy ' + low.a.hoy);
+assert.ok(low.b.lav >= 3000 && low.ordna.lav >= 3000);
+assert.ok(low.b.hoy >= 5000 && low.ordna.hoy >= 5000);
 assert.notStrictEqual(low.a.lav, 0);
 assert.notStrictEqual(low.b.lav, 0);
 assert.notStrictEqual(low.ordna.lav, 0);
+assert.strictEqual(low.celleId, '10-30|o300');
 assert.strictEqual(ff.verifyLag(low.a).ok, true, JSON.stringify(ff.verifyLag(low.a)));
+assert.strictEqual(ff.verifyLag(low.b).ok, true, JSON.stringify(ff.verifyLag(low.b)));
+assert.strictEqual(ff.verifyLag(low.ordna).ok, true, JSON.stringify(ff.verifyLag(low.ordna)));
 
 // Ståtid inngår i det ene estimatet (alle armer like). Den klemmes ikke inn i margin-maks.
 const stood = ff.buildFossefall(Object.assign(ctx(), {
@@ -260,12 +280,31 @@ assert.strictEqual(stood.b.statid, stood.a.statid);
 assert.strictEqual(stood.ordna.statid, stood.a.statid);
 assert.strictEqual(stood.a.peasy_bud_mid, stood.b.peasy_bud_mid);
 assert.strictEqual(stood.b.peasy_bud_mid, stood.ordna.peasy_bud_mid);
+assert.strictEqual(stood.estimertPeasyBud, stood.a.peasy_bud_mid);
+assert.notStrictEqual(stood.a.peasy_bud_mid, live.a.peasy_bud_mid);
+assert.strictEqual(
+  stood.a.peasy_bud_mid,
+  ff._internal.roundKr(stood.a.ar_bud + stood.a.peasy_avgift.lav + stood.a.statid)
+);
+assert.strictEqual(stood.a.lav, stood.a.peasy_bud_mid - 20000);
+assert.strictEqual(stood.a.hoy, stood.a.peasy_bud_mid + 13000);
 assert.strictEqual(stood.a.lav, stood.b.lav);
 assert.strictEqual(stood.a.hoy, stood.ordna.hoy);
+assert.strictEqual(stood.a.peasy_avgift.lav, live.a.peasy_avgift.lav);
 assert.strictEqual(stood.a.forhandlermargin, -38000);
 assert.strictEqual(ff.verifyLag(stood.a).ok, true, JSON.stringify(ff.verifyLag(stood.a)));
 assert.strictEqual(ff.verifyLag(stood.b).ok, true, JSON.stringify(ff.verifyLag(stood.b)));
 assert.ok(stood.a.lav < live.a.lav);
+
+// Spenn som ikke er hele tusen: lav/høy følger avrundet midt, de rundes ikke hver for seg.
+const oddSpenn = JSON.parse(JSON.stringify(satser));
+oddSpenn.spenn['150-250|50-120'] = '2500|1300';
+const odd = ff.computeSharedFossefall(Object.assign(ctx(), { satser: oddSpenn, profile: 'a' }));
+const oddRaw = odd.ar_bud + odd.peasy_avgift.lav;
+assert.strictEqual(odd.peasy_bud_mid, ff._internal.roundKr(oddRaw));
+assert.strictEqual(odd.lav, odd.peasy_bud_mid - 2500);
+assert.strictEqual(odd.hoy, odd.peasy_bud_mid + 1300);
+assert.notStrictEqual(odd.lav, ff._internal.roundKr(oddRaw - 2500));
 
 delete process.env.FOSSEFALL_TABLES_LIVE;
 delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
