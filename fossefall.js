@@ -1,30 +1,35 @@
 'use strict';
 /**
- * fossefall.js — v20.146
+ * fossefall.js — v20.147
  * Delbeløp i kroner. Ingen X-faktor.
  * usikkerhet_takst (alias spenn). returtrekk fjernet (var alias/dobbeltbokføring).
  *
- * v20.146: ståtid inngår i den ene peasy-bud-midten (ikke bare som skift på lav/høy).
+ * v20.147: QA-kortet publiserer hvert lag-felt for seg.
+ * avsetning_takst er et eget tall (ikke bare bakt inn i peasy_bud_mid).
+ * Spenn publiseres som { lav, hoy }, aldri som én «ned|opp»-streng.
+ * v20.146: ståtid inngår i peasy-bud-midten (ikke bare som skift på lav/høy).
  * Midt rundes til hele 1000 først (half up). Lav/høy = den midten ∓ spenn.
  * Deretter vrakpant-gulv på midt, lav og høy. AR-bud ≤ 0 er ikke PRIS MANUELT.
  * celleId = prisbånd|kmbånd (Pulse-aksene).
- * v20.144: ett tall, så ett spenn, så profil som merkelapp.
- * Finn → margin → takst → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
- * Spenn-tabellens ned|opp legges rundt den samme midten → lav/høy.
- * A / B / Ordna viser den samme midten og det samme intervallet. De skalerer ikke (ikke ×1.00 / ×0.90 / ×0.75).
- * STATID_A_LIVE (default på): ståtid inngår i peasy-bud-midt og kopieres til alle armer. Den klemmes ikke av margin-maks.
+ * Finn → margin → takst → omreg → klargjøring 1000 → AR-bud → peasyFee → peasyBud (midt A).
+ * ARM_SCALE: B = rund(A × 0.9), Ordna = rund(A × 0.75). Satstabellene er de samme.
+ * Spenn-tabellens ned|opp legges rundt hver arms midt → lav/høy.
+ * STATID_A_LIVE (default på): ståtid inngår i midten før skalering og kopieres som samme kr på alle armer.
+ * Den klemmes ikke av margin-maks.
  * FOSSEFALL_TABLES_LIVE=1: a/b/ordna kommer fra tabellene.
  * Default (flagget av): gammel computeA/computeBand blir stående; ny motor ligger i fossefall_v2.
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.146';
+const FOSSEFALL_VERSION = 'v20.147';
 
-/** Merkelapp for Softteam. Ingen multiplikator — alle armer deler én midt og ett spenn. */
+/** Profil på samme foss. Ikke egne satser — bare denne multiplikatoren på A-midten. */
+const ARM_SCALE = { a: 1, b: 0.9, ordna: 0.75 };
+
 const PROFILES = {
-  a: { id: 'a', label: 'snill' },
-  b: { id: 'b', label: 'tro' },
-  ordna: { id: 'ordna', label: 'underpromise' },
+  a: { id: 'a', mult: ARM_SCALE.a, label: 'snill' },
+  b: { id: 'b', mult: ARM_SCALE.b, label: 'tro' },
+  ordna: { id: 'ordna', mult: ARM_SCALE.ordna, label: 'underpromise' },
 };
 
 /** Ny sti. Gammel Easy-sti (computeA) beholder EASY_COST.klargjoring = 5000. */
@@ -724,11 +729,12 @@ function skipArm(profile, grunn) {
 }
 
 /**
- * Ett fossefall. Profilen er bare hvilken arm som vises.
+ * Ett fossefall. Profilen skalerer den avrundede A-midten (ARM_SCALE).
  * Finn − forhandlermargin − avsetning takst − omreg − klargjøring 1000 = AR-bud
- * AR-bud − peasyFee = én peasyBud (midt). Ingen profil-skalering.
- * Spenn ned|opp legges rundt den avrundede midten → lav/høy.
- * Ståtid (samme beløp på alle armer når den er på) ligger i midten, etter fee, og klemmes ikke av margin-maks.
+ * AR-bud − peasyFee + ståtid = A-midt. B = rund(A × 0.9), Ordna = rund(A × 0.75).
+ * Spenn ned|opp legges rundt den armens midt → lav/høy.
+ * Skaladifferansen ligger i tillegg-bud (B) eller ordna-trekk, så lagene fortsatt summerer.
+ * Ståtid (samme kr på alle armer når den er på) ligger i midten før skalering og klemmes ikke av margin-maks.
  * Vrakpant-gulv på midt/lav/høy legges på i buildSharedFossefall, etter avrundingen.
  */
 function computeSharedFossefall(opts) {
@@ -766,13 +772,17 @@ function computeSharedFossefall(opts) {
 
   const arBud = finn - margin - takst - omregKr - KLARGJORING_KR;
   const fee = peasyFee(arBud);
-  // Ståtid etter fee, inne i den ene midten. Rund midt først, så lav/høy fra den midten ± spenn.
+  // Ståtid etter fee, inne i A-midten. Rund A først, skaler armen, så lav/høy = den midten ± spenn.
   const midRaw = arBud - fee + statidKr;
-  const peasyBudMid = roundKr(midRaw);
+  const unscaledMid = roundKr(midRaw);
+  const peasyBudMid = roundKr(unscaledMid * Number(prof.mult));
+  const scaleDelta = peasyBudMid - unscaledMid;
   const lav = peasyBudMid - ned;
   const hoy = peasyBudMid + opp;
-  const midAvr = peasyBudMid - midRaw;
+  const midAvr = unscaledMid - midRaw;
   const celleId = celleIdOf(looked);
+  const tilleggBud = prof.id === 'b' ? { lav: scaleDelta, hoy: scaleDelta } : emptySide();
+  const ordnaTrekk = prof.id === 'ordna' ? { lav: scaleDelta, hoy: scaleDelta } : emptySide();
 
   const originCapInfo = opts.originCapInfo || null;
   const origin_cap = (originCapInfo && Number(originCapInfo.kr)) || 0;
@@ -783,6 +793,7 @@ function computeSharedFossefall(opts) {
     grunn: null,
     profile: prof.id,
     profil: prof.label,
+    profil_mult: prof.mult,
     price_id: looked.priceId,
     km_id: looked.kmId,
     celleId,
@@ -807,8 +818,8 @@ function computeSharedFossefall(opts) {
     klargjoring: -KLARGJORING_KR,
     usikkerhet_takst: { lav: -ned, hoy: opp },
     spenn: { lav: -ned, hoy: opp },
-    forhandlermargin_tillegg_bud: emptySide(),
-    ordna_trekk: emptySide(),
+    forhandlermargin_tillegg_bud: tilleggBud,
+    ordna_trekk: ordnaTrekk,
     vrakpant_gulv: emptySide(),
     avrunding: { lav: midAvr, hoy: midAvr },
     peasy_avgift: { lav: -fee, hoy: -fee },
@@ -1078,14 +1089,95 @@ function buildFossefall(opts) {
   });
 }
 
+function finiteNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Spenn til to tall. Tabellstrengen «20000|13000» blir { lav: -20000, hoy: 13000 }.
+ * Allerede signert { lav, hoy } beholdes. Aldri én sammenslått streng ut.
+ */
+function spennPair(v) {
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    const lav = finiteNum(v.lav != null ? v.lav : v.ned);
+    const hoy = finiteNum(v.hoy != null ? v.hoy : v.opp);
+    if (lav == null || hoy == null) return null;
+    return { lav, hoy };
+  }
+  if (typeof v === 'string' && v.indexOf('|') >= 0) {
+    const parsed = parseSpenn(v);
+    if (!parsed) return null;
+    return { lav: -Math.abs(parsed.ned), hoy: Math.abs(parsed.opp) };
+  }
+  return null;
+}
+
+function publishArm(arm) {
+  if (!arm || typeof arm !== 'object') return null;
+  const out = Object.assign({}, arm);
+  delete out._meta;
+  const takst = finiteNum(arm.avsetning_takst);
+  out.avsetning_takst = takst;
+  const spenn = spennPair(arm.usikkerhet_takst) || spennPair(arm.spenn);
+  out.usikkerhet_takst = spenn ? { lav: spenn.lav, hoy: spenn.hoy } : null;
+  out.spenn = spenn ? { lav: spenn.lav, hoy: spenn.hoy } : null;
+  if (arm.peasy_avgift && typeof arm.peasy_avgift === 'object') {
+    out.peasy_avgift = {
+      lav: finiteNum(arm.peasy_avgift.lav),
+      hoy: finiteNum(arm.peasy_avgift.hoy),
+    };
+  }
+  const mid = finiteNum(arm.peasy_bud_mid != null ? arm.peasy_bud_mid : arm.estimertPeasyBud);
+  if (mid != null) {
+    out.peasy_bud_mid = mid;
+    if (out.estimertPeasyBud == null) out.estimertPeasyBud = mid;
+  }
+  if (out.statid == null) out.statid = finiteNum(arm.statid);
+  return out;
+}
+
+/**
+ * Kortet som skrives til measurements. Hvert lag beholder avsetning_takst,
+ * ståtid, omreg, klargjøring, peasy-avgift og spenn lav/høy som egne felt.
+ */
+function fossefallQaCard(shared) {
+  if (!shared || typeof shared !== 'object') return null;
+  const a = publishArm(shared.a);
+  const b = publishArm(shared.b);
+  const ordna = publishArm(shared.ordna);
+  const aMid = a && a.peasy_bud_mid != null ? a.peasy_bud_mid : finiteNum(shared.peasy_bud_mid);
+  return {
+    a,
+    b,
+    ordna,
+    estimertPeasyBud: aMid != null ? aMid : finiteNum(shared.estimertPeasyBud),
+    peasy_bud_mid: aMid,
+    lav: a ? a.lav : shared.lav,
+    hoy: a ? a.hoy : shared.hoy,
+    price_id: shared.price_id || (a && a.price_id) || null,
+    km_id: shared.km_id || (a && a.km_id) || null,
+    celleId: shared.celleId || (a && a.celleId) || null,
+    engine: shared.engine || (a && a._meta && a._meta.engine) || null,
+    grunn: shared.grunn || null,
+    pris_manuelt: !!shared.pris_manuelt,
+    statid_manuell: !!shared.statid_manuell,
+    statid_kr: shared.statid_kr != null ? shared.statid_kr : (a && a.statid != null ? a.statid : 0),
+    version: shared.version || FOSSEFALL_VERSION,
+    arm_scale: { a: ARM_SCALE.a, b: ARM_SCALE.b, ordna: ARM_SCALE.ordna },
+  };
+}
+
 module.exports = {
   FOSSEFALL_VERSION,
+  ARM_SCALE,
   PROFILES,
   KLARGJORING_KR,
   CONFIG_URL,
   buildFossefall,
   buildSharedFossefall,
   computeSharedFossefall,
+  fossefallQaCard,
   lookupFossefallCell,
   loadFossefallSatser,
   getFossefallSatser,

@@ -50,7 +50,7 @@ const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 const originCvLib = require('./origin-cv');
 const fossefall = require('./fossefall');
 
-const VERSION = 'v20.80';
+const VERSION = 'v20.81';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1382,8 +1382,10 @@ function applyFossefallShadow(valuation, ctx) {
     return valuation;
   }
   const v2 = built && built.fossefall_v2;
+  const card = fossefall.fossefallQaCard(v2);
   const midOf = (arm) => (arm && !arm.skip && arm.peasy_bud_mid != null) ? arm.peasy_bud_mid : null;
-  valuation.fossefall_shadow = {
+  // QA-measurements leser armene. Kortet beholder avsetning_takst og spenn lav/høy.
+  valuation.fossefall_shadow = Object.assign({}, card || {}, {
     version: fossefall.FOSSEFALL_VERSION,
     tables_live: !!(built && built.tables_live),
     engine: built && built.engine,
@@ -1393,25 +1395,16 @@ function applyFossefallShadow(valuation, ctx) {
     celleId: (v2 && (v2.celleId || (v2.a && v2.a.celleId))) || (built && built.celleId) || null,
     legacy_dLav: legacyLav,
     legacy_dHoy: legacyHoy,
-    estimertPeasyBud: midOf(v2 && v2.a),
-    a_mid: midOf(v2 && v2.a),
-    b_mid: midOf(v2 && v2.b),
-    ordna_mid: midOf(v2 && v2.ordna),
-    a_lav: v2 && v2.a ? v2.a.lav : null,
-    a_hoy: v2 && v2.a ? v2.a.hoy : null,
-    klargjoring: v2 && v2.a ? v2.a.klargjoring : null,
-  };
-  valuation.fossefall_v2 = v2 ? {
-    a: v2.a,
-    b: v2.b,
-    ordna: v2.ordna,
-    pris_manuelt: !!v2.pris_manuelt,
-    grunn: v2.grunn || null,
-    price_id: v2.price_id || null,
-    km_id: v2.km_id || null,
-    celleId: v2.celleId || (v2.a && v2.a.celleId) || null,
-    engine: v2.engine || 'fossefallSatser',
-  } : null;
+    estimertPeasyBud: midOf(card && card.a),
+    a_mid: midOf(card && card.a),
+    b_mid: midOf(card && card.b),
+    ordna_mid: midOf(card && card.ordna),
+    a_lav: card && card.a ? card.a.lav : null,
+    a_hoy: card && card.a ? card.a.hoy : null,
+    klargjoring: card && card.a ? card.a.klargjoring : null,
+    avsetning_takst: card && card.a ? card.a.avsetning_takst : null,
+  });
+  valuation.fossefall_v2 = card;
   if (built && built.tables_live && built.a && !built.a.skip && Number.isFinite(Number(built.a.lav)) && Number.isFinite(Number(built.a.hoy))) {
     valuation.dLav = built.a.lav;
     valuation.dHoy = built.a.hoy;
@@ -1429,8 +1422,9 @@ function applyFossefallShadow(valuation, ctx) {
   const s = valuation.fossefall_shadow;
   log('fossefall ' + fossefall.FOSSEFALL_VERSION + ' ' + s.engine + ' live=' + s.tables_live
     + ' celle ' + (s.celleId || '—')
-    + ' midt ' + s.estimertPeasyBud + ' lav/hoy ' + s.a_lav + '/' + s.a_hoy
-    + ' A=B=Ordna ' + (s.a_mid != null && s.a_mid === s.b_mid && s.b_mid === s.ordna_mid)
+    + ' midt A/B/Ordna ' + s.a_mid + '/' + s.b_mid + '/' + s.ordna_mid
+    + ' lav/hoy ' + s.a_lav + '/' + s.a_hoy
+    + ' avsetning_takst ' + s.avsetning_takst
     + (s.grunn ? ' (' + s.grunn + ')' : '')
     + ' legacy ' + legacyLav + '/' + legacyHoy);
   return valuation;
