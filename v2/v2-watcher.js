@@ -16,6 +16,7 @@ import { evalRegnr } from './v2-eval.js';
 
 const require = createRequire(import.meta.url);
 const originCvLib = require('../jr/origin-cv.js');
+const fossefallCard = require('../fossefall-card.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const QUEUE_FILE = process.env.V2_QUEUE_FILE || '/Users/bot/peasy-pricing-v2-queue.txt';
@@ -92,9 +93,12 @@ async function processLine(line) {
       });
       if (recent) {
         const r = JSON.parse(recent);
-        const hoursAgo = Math.round((Date.now() - new Date(r.timestamp).getTime()) / 3600000);
-        console.log(`[${ts()}] SKIP ${regnr} — allerede evaluert for ${hoursAgo}t siden (v2 anker=${r.v2?.anker || '?'})`);
-        return;
+        if (fossefallCard.measurementHasCompleteFossefall(r)) {
+          const hoursAgo = Math.round((Date.now() - new Date(r.timestamp).getTime()) / 3600000);
+          console.log(`[${ts()}] SKIP ${regnr} — allerede evaluert for ${hoursAgo}t siden (v2 anker=${r.v2?.anker || '?'})`);
+          return;
+        }
+        console.log(`[${ts()}] ${regnr} har måling uten komplett fossefall — kjører på nytt`);
       }
     }
   } catch(e) { console.error(`[${ts()}] Dedupe-sjekk feilet, fortsetter: ${e.message}`); }
