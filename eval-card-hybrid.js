@@ -16,6 +16,8 @@
 
 'use strict';
 
+const { formatFossefallBlock } = require('./fossefall-card');
+
 function nf(n) {
   const v = Number(n);
   return Number.isFinite(v) ? Math.round(v).toLocaleString('nb-NO') : '?';
@@ -241,7 +243,13 @@ function formatEvalCardHybrid(p, forErp = false) {
   out.push(forErp ? ('Car.info verdivurdering: ' + carInfoUrl2) : ('<a href="' + esc(carInfoUrl2) + '">Car.info verdivurdering</a>'));
   out.push('');
 
-  // ── 7. KALKYLE (Easy calcValuation — fasit som skrives til ERP) ─
+  // ── 6c. FOSSEFALL (primær) — midt, lav, høy, celle-id, tables path ─
+  const ffCard = p.fossefall || val.fossefall || null;
+  const ffBlock = formatFossefallBlock(ffCard);
+  out.push(forErp ? ffBlock : `<pre>${esc(ffBlock)}</pre>`);
+  out.push('');
+
+  // ── 7. KALKYLE (easy-shadow — ikke primær når fossefall finnes) ─
   const spreadStr = val.spreadPct != null ? `±${(val.spreadPct * 100).toFixed(1)}%` : '?';
   const kalkyleBody = [
     `Bracket: ${val.bracket || '?'}`,
@@ -264,7 +272,7 @@ function formatEvalCardHybrid(p, forErp = false) {
       return [];
     })()),
   ].join('\n');
-  out.push(B('KALKYLE'));
+  out.push(B(ffCard ? 'KALKYLE (easy-shadow)' : 'KALKYLE'));
   out.push(forErp ? kalkyleBody : `<pre>${esc(kalkyleBody)}</pre>`);
   out.push('');
 

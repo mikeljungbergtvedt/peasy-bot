@@ -57,8 +57,10 @@ export async function recordMeasurement(run, easyEval) {
       bracket: easyEval.bracket || null,
       anchor_reason: easyEval.anchor_reason || null,
       km_override: easyEval.km_override || null,
+      fossefall: easyEval.fossefall || null,
     } : null,
 
+    fossefall: (easyEval && easyEval.fossefall) || null,
     km_override: (easyEval && easyEval.km_override) || null,
 
     v2: {

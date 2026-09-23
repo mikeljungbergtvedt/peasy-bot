@@ -49,8 +49,9 @@ const easy = require('./easy-anchor');
 const { formatEvalCardHybrid } = require('./eval-card-hybrid');
 const originCvLib = require('./origin-cv');
 const fossefall = require('./fossefall');
+const fossefallCard = require('./fossefall-card');
 
-const VERSION = 'v20.80';
+const VERSION = 'v20.147';
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -136,7 +137,7 @@ function saveJSON(file, data) {
 }
 
 // ── Cache ─────────────────────────────────────────────────────
-function isInCache(cache, erpId) { return !!cache[String(erpId)]; }
+function isInCache(cache, erpId) { return fossefallCard.cacheSkipsReprice(cache[String(erpId)]); }
 function writeFinnLink(erpId, finnSelf) {
   try {
     if (!erpId) return;
@@ -149,10 +150,53 @@ function writeFinnLink(erpId, finnSelf) {
     fs.writeFileSync(FP, JSON.stringify(m));
   } catch (e) { try { logErr('writeFinnLink ' + erpId, e); } catch (e2) {} }
 }
-function addToCache(cache, erpId) {
-  if (erpId) { cache[String(erpId)] = new Date().toISOString(); }
+function addToCache(cache, erpId, stamp) {
+  if (erpId) {
+    cache[String(erpId)] = stamp && typeof stamp === 'object'
+      ? stamp
+      : fossefallCard.cacheStamp(null);
+  }
   saveJSON(CACHE_FILE, cache);
   log(`Cache: ${erpId} lagt til`);
+}
+
+function writeErpForArm(bil, erpId, regnr, valuation, brreg, token) {
+  const plan = fossefallCard.planErpWrite({
+    erpId: erpId,
+    source: bil && bil.source,
+    card: valuation && valuation.fossefall,
+    legacyLav: valuation && valuation.dLav,
+    legacyHoy: valuation && valuation.dHoy,
+  });
+  if (plan.reason === 'ERP: skrives av B') log('ERP: skrives av B');
+  else if (plan.reason) log(plan.reason + ' ' + regnr);
+  if (!plan.writeErp) return Promise.resolve({ erpWritten: false, plan: plan });
+  const atid = Number(plan.dLav) <= 35000 ? 2 : 1;
+  return maybeWriteToERP(bil, erpId, plan.dLav, plan.dHoy, atid, brreg && brreg.anyDebts, brreg, token)
+    .then(function (erpWritten) { return { erpWritten: !!erpWritten, plan: plan }; });
+}
+
+function publishQaCard(cache, erpId, regnr, valuation, extra) {
+  const qaCard = valuation && valuation.fossefall;
+  const record = fossefallCard.measurementFromPass(Object.assign({
+    regnr: regnr,
+    erpId: erpId,
+    card: qaCard,
+    dLav: qaCard && qaCard.lav,
+    dHoy: qaCard && qaCard.hoy,
+  }, extra || {}));
+  const published = fossefallCard.appendMeasurement(record);
+  if (!published.ok) {
+    log('QA-kort ikke lagret for ' + regnr + ': ' + (published.error || ''));
+    return false;
+  }
+  log('QA-kort fossefall ' + (qaCard && qaCard.tables_path || 'mangler') + ' ' + regnr);
+  if (fossefallCard.isCompleteCard(qaCard)) {
+    addToCache(cache, erpId, fossefallCard.cacheStamp(qaCard));
+    return true;
+  }
+  log('Cache: ' + regnr + ' ikke stemplet — fossefall ufullstendig');
+  return false;
 }
 
 
@@ -1426,13 +1470,23 @@ function applyFossefallShadow(valuation, ctx) {
     valuation.dLav = null;
     valuation.dHoy = null;
   }
+  valuation.fossefall = fossefallCard.cardFromBuilt(built);
   const s = valuation.fossefall_shadow;
+  const card = valuation.fossefall;
+  const klarg = card && card.a && card.a.klargjoring;
   log('fossefall ' + fossefall.FOSSEFALL_VERSION + ' ' + s.engine + ' live=' + s.tables_live
     + ' celle ' + (s.celleId || '—')
     + ' midt ' + s.estimertPeasyBud + ' lav/hoy ' + s.a_lav + '/' + s.a_hoy
     + ' A=B=Ordna ' + (s.a_mid != null && s.a_mid === s.b_mid && s.b_mid === s.ordna_mid)
     + (s.grunn ? ' (' + s.grunn + ')' : '')
     + ' legacy ' + legacyLav + '/' + legacyHoy);
+  log('Primaer kalkyle: ' + ((card && card.engine) || 'mangler')
+    + ' klarg=' + (klarg != null ? Math.abs(Number(klarg)) : '?')
+    + ' celle ' + ((card && card.celleId) || '—')
+    + ' tables ' + ((card && card.tables_path) || '—')
+    + ' midt ' + (card && card.peasy_bud_mid)
+    + ' lav/hoy ' + (card && card.lav) + '/' + (card && card.hoy)
+    + (card && card.pris_manuelt ? ' PRIS MANUELT' : ''));
   return valuation;
 }
 
@@ -1855,6 +1909,9 @@ async function evalCar(bil, page, cache, opts = {}) {
     log(`Cache: ${regnr} allerede skrevet — hopper over`);
     return;
   }
+  if (!qaOverrideUrl && cache[String(erpId)]) {
+    log(`Cache: ${regnr} uten komplett fossefall — repriser`);
+  }
 
   let vegData;
   let vegDataFallback = false;
@@ -2185,32 +2242,42 @@ async function evalCar(bil, page, cache, opts = {}) {
           sdCommentF = (detF && detF.car && detF.car.self_declaration && detF.car.self_declaration.comment) || (detF && detF.car && detF.car.description) || null;
           imageCountF = (detF && detF.car && Array.isArray(detF.car.files)) ? detF.car.files.length : 0;
         } catch (eDf) {}
-        if (await stopIfPrisManuelt(valuationF, regnr, erpId)) return;
+        await stopIfPrisManuelt(valuationF, regnr, erpId);
         if (await _maybeBlock({ sdComment: sdCommentF, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: poolF, segConfidence: segF && segF.confidence, dLav: valuationF.dLav, dHoy: valuationF.dHoy })) return;
-        const erpWrittenF = await maybeWriteToERP(bil, erpId, valuationF.dLav, valuationF.dHoy, valuationF.auctionTypeId, brregF.anyDebts, brregF, tokenF);
+        const armF = await writeErpForArm(bil, erpId, regnr, valuationF, brregF, tokenF);
+        const erpWrittenF = armF.erpWritten;
         const erpVerifyF = await maybeVerifyErp(bil, erpId, tokenF);
         const cardF = {
           bil: bil, vegData: vegData, pool: poolF, anchor: anchorF, finnUrl: rF.finnUrl, totalCount: rF.totalCount, seg: segF,
           finnListing: finnSelf, brreg: brregF, valuation: valuationF, sdComment: sdCommentF, imageCount: imageCountF,
           erpWritten: erpWrittenF, erpVerify: erpVerifyF, chatPosted: false, qaOverride: false,
           funnelSteps: (rF && rF.funnelSteps) || [], prevEvals: getPrevEvals(regnr, erpId),
-          kmOverride
+          kmOverride,
+          fossefall: valuationF.fossefall || null,
         };
         const merkeF = '⚠️ FALLBACK: Finn-basert anker (v2 feilet: ' + v2feil + ')\n\n';
-        const chatPostedF = await maybePostToChat(bil, erpId, merkeF + formatEvalCard(cardF, true), tokenF);
+        const ffBlockF = fossefallCard.formatFossefallBlock(valuationF.fossefall);
+        const chatPostedF = await maybePostToChat(bil, erpId, merkeF + ffBlockF + '\n\n' + formatEvalCard(cardF, true), tokenF);
         _evalRegnrMap[erpId] = regnr;
         _evalDataMap[erpId] = { regnr: regnr, segment: segF.segment, lowestComp: valuationF.lowestComp, anyDebts: brregF.anyDebts, brreg: brregF, bil: bil };
         persistEvalData();
-        await sendTelegram(merkeF + formatEvalCard(Object.assign({}, cardF, { chatPosted: chatPostedF }), false),
+        await sendTelegram(merkeF + ffBlockF + '\n\n' + formatEvalCard(Object.assign({}, cardF, { chatPosted: chatPostedF }), false),
           (bil.id ? { inline_keyboard: [[{ text: '✅ Send eval', callback_data: 'confirm:' + erpId }, { text: '✏️ Endre anker', callback_data: 'editanchor:' + erpId }, { text: '🗑 Slett cache', callback_data: 'delcache:' + erpId }]] } : undefined));
-        if (erpWrittenF) addToCache(cache, erpId);
+        publishQaCard(cache, erpId, regnr, valuationF, {
+          km: originKm != null ? originKm : bil.mileage,
+          anker: anchorF.price,
+          originCv: originCv,
+          dLav: armF.plan && armF.plan.dLav != null ? armF.plan.dLav : valuationF.dLav,
+          dHoy: armF.plan && armF.plan.dHoy != null ? armF.plan.dHoy : valuationF.dHoy,
+        });
         try {
           var v2PayloadF = JSON.stringify({
             registration_number: regnr, id: erpId, model_year: bil.model_year,
             mileage: originCv.km != null ? originCv.km : bil.mileage, model_series: bil.model_series,
             make: vegData ? vegData.make : (bil.make || ''),
             origin_cv: originCv,
-            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: easyConfidence, begrunnelse_kort: easyBegr, anker_kilde: 'finn', km_override: kmOverride, fossefall: valuationF.fossefall_shadow || null }
+            fossefall: valuationF.fossefall || null,
+            easy_eval: { anker: anchorF.price || null, dLav: valuationF.dLav || null, dHoy: valuationF.dHoy || null, bracket: valuationF.bracket || null, fallback: true, confidence: easyConfidence, begrunnelse_kort: easyBegr, anker_kilde: 'finn', km_override: kmOverride, fossefall: valuationF.fossefall || null }
           });
           fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2PayloadF + '\n');
           log('[easy->v2] Matet shadow (fallback) for ' + regnr);
@@ -2284,10 +2351,11 @@ async function evalCar(bil, page, cache, opts = {}) {
     // --- end signaler-data write ---
     } catch (e) { logErr('getErpCarDetail', e); }
 
-    // 8. Skriv til ERP
-    if (await stopIfPrisManuelt(valuation, regnr, erpId)) return;
+    // 8. ERP-bud (A) + QA-kort med fossefall (A og B). Odd erpId skriver ikke bud.
+    await stopIfPrisManuelt(valuation, regnr, erpId);
     if (await _maybeBlock({ sdComment: sdComment, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: (v2 && v2.anchor && v2.anchor.valgte_comps) || [], segConfidence: seg && seg.confidence, dLav: valuation.dLav, dHoy: valuation.dHoy })) return;
-    const erpWritten = await maybeWriteToERP(bil, erpId, valuation.dLav, valuation.dHoy, valuation.auctionTypeId, brreg.anyDebts, brreg, token);
+    const armWrite = await writeErpForArm(bil, erpId, regnr, valuation, brreg, token);
+    const erpWritten = armWrite.erpWritten;
 
     // 9. Verifiser ERP
     const erpVerify = await maybeVerifyErp(bil, erpId, token);
@@ -2314,6 +2382,7 @@ async function evalCar(bil, page, cache, opts = {}) {
       prevEvals: getPrevEvals(regnr, erpId),
       erpWritten, erpVerify, chatPosted: false, qaOverride: !!qaOverrideUrl,
       kmOverride,
+      fossefall: valuation.fossefall || null,
     };
     const erpText = formatEvalCardHybrid(cardParams, true);
     const chatPosted = await maybePostToChat(bil, erpId, erpText, token);
@@ -2355,7 +2424,8 @@ async function evalCar(bil, page, cache, opts = {}) {
           mileage: originCv.km != null ? originCv.km : bil.mileage, model_series: bil.model_series,
           make: vegData ? vegData.make : (bil.make || ''),
           origin_cv: originCv,
-          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride, fossefall: (valuation && valuation.fossefall_shadow) || null }
+          fossefall: (valuation && valuation.fossefall) || null,
+          easy_eval: { anker: (anchor && anchor.price) || null, dLav: (valuation && valuation.dLav) || null, dHoy: (valuation && valuation.dHoy) || null, bracket: (valuation && valuation.bracket) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride, fossefall: (valuation && valuation.fossefall) || null }
         });
         fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2Payload + '\n');
         log('[easy->v2] Matet shadow for ' + regnr);
@@ -2363,10 +2433,17 @@ async function evalCar(bil, page, cache, opts = {}) {
     } catch (eFeed) { logErr('easy->v2 feed', eFeed); }
 
 
-    // 12. Cache
-    if (erpWritten) addToCache(cache, erpId);
+    // 12. Cache bare når QA-kortet har komplett fossefall (A og B).
+    publishQaCard(cache, erpId, regnr, valuation, {
+      km: originKm != null ? originKm : bil.mileage,
+      anker: anchor && anchor.price,
+      originCv: originCv,
+      dLav: armWrite.plan && armWrite.plan.dLav != null ? armWrite.plan.dLav : valuation.dLav,
+      dHoy: armWrite.plan && armWrite.plan.dHoy != null ? armWrite.plan.dHoy : valuation.dHoy,
+    });
 
-    log(`--- ${regnr} ferdig | ERP: ${erpWritten ? 'OK' : 'FEIL'} | Chat: ${chatPosted ? 'OK' : 'skip'} ---`);
+    const erpLog = erpWritten ? 'OK' : ((armWrite.plan && armWrite.plan.writeErp === false) ? armWrite.plan.reason : 'FEIL');
+    log(`--- ${regnr} ferdig | ERP: ${erpLog} | Chat: ${chatPosted ? 'OK' : 'skip'} ---`);
 
   } catch (err) {
     logErr(`evalCar ${regnr}`, err);
@@ -2434,7 +2511,10 @@ async function checkFlushWatch(cache) {
 }
 
 async function pushPulseStatus(biler, cache) {
-  const venter = (biler || []).filter(b => !cache[b.id]).length;
+  // venter = liste 3 som fortsatt mangler komplett fossefall-stempel.
+  // liste3 er ERP-antallet. Pulse QA er et annet filter (sendt-port) og tegner
+  // fossefall bare når measurement.fossefall har A/B/Ordna.
+  const venter = (biler || []).filter(b => !fossefallCard.cacheSkipsReprice(cache[String(b.id)])).length;
   const rec = { liste3: (biler || []).length, venter: venter, timestamp: new Date().toISOString() };
   const TOKEN = process.env.GITHUB_TOKEN;
   if (!TOKEN) { log('pulse-status: GITHUB_TOKEN mangler i .env'); return; }
