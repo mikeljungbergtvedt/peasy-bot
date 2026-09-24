@@ -5,7 +5,7 @@
 const assert = require('assert');
 const ff = require('./fossefall');
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.151');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.152');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -297,9 +297,10 @@ assert.strictEqual(stood.b.peasy_bud_mid, ff._internal.roundKr(stood.a.peasy_bud
 assert.strictEqual(stood.ordna.peasy_bud_mid, ff._internal.roundKr(stood.a.peasy_bud_mid * 0.75));
 assert.strictEqual(stood.estimertPeasyBud, stood.a.peasy_bud_mid);
 assert.notStrictEqual(stood.a.peasy_bud_mid, live.a.peasy_bud_mid);
+// v20.152: staatid ligger inne i ar_bud, ikke lagt pa etter avgiften.
 assert.strictEqual(
   stood.a.peasy_bud_mid,
-  ff._internal.roundKr(stood.a.ar_bud + stood.a.peasy_avgift.lav + stood.a.statid)
+  ff._internal.roundKr(stood.a.ar_bud + stood.a.peasy_avgift.lav)
 );
 assert.strictEqual(stood.a.lav, stood.a.peasy_bud_mid - 20000);
 assert.strictEqual(stood.a.hoy, stood.a.peasy_bud_mid + 13000);
@@ -367,6 +368,50 @@ for (const finn of [20000, 48000, 90000, 170000, 350000, 900000]) {
   }
 }
 delete process.env.FOSSEFALL_TABLES_LIVE;
+
+// --- v20.152: staatid ligger OVER Peasy-avgiften ---
+// Avgiften er en trapp slatt opp pa AR-bud. La staatid under, kunne en bil
+// med staatidskostnad havne i for hoyt avgiftstrinn.
+{
+  const base = Object.assign(ctx(), { profile: 'a' });
+  const uten = ff.computeSharedFossefall(Object.assign({}, base, { statidKr: 0 }));
+  const med  = ff.computeSharedFossefall(Object.assign({}, base, { statidKr: -12000 }));
+
+  // Staatid er inne i AR-bud, ikke lagt pa etterpa.
+  assert.strictEqual(med.ar_bud, uten.ar_bud - 12000, 'staatid ikke i AR-bud');
+  assert.strictEqual(med.statid, -12000);
+  assert.strictEqual(uten.statid, 0);
+
+  // Avgiften kan bare falle eller sta stille nar AR-bud faller.
+  const avgUten = -uten.peasy_avgift.lav, avgMed = -med.peasy_avgift.lav;
+  assert.ok(avgMed <= avgUten, 'avgift steg av staatidskostnad: ' + avgUten + ' -> ' + avgMed);
+
+  // Midten faller med minst staatiden (mer hvis avgiften ogsa falt et trinn).
+  assert.ok(med.peasy_bud_mid <= uten.peasy_bud_mid - 11000,
+    'midt falt ikke med staatiden: ' + uten.peasy_bud_mid + ' -> ' + med.peasy_bud_mid);
+
+  // Null staatid skal ikke endre noe i det hele tatt.
+  const null0 = ff.computeSharedFossefall(Object.assign({}, base, { statidKr: 0 }));
+  assert.strictEqual(null0.ar_bud, uten.ar_bud);
+  assert.strictEqual(null0.peasy_bud_mid, uten.peasy_bud_mid);
+  assert.deepStrictEqual(null0.peasy_avgift, uten.peasy_avgift);
+}
+
+// Avgiftstrinn skal faktisk kunne falle: finn en bil rett over en trinngrense.
+{
+  let kryssetTrinn = false;
+  for (const finn of [60000, 80000, 110000, 140000, 175000, 210000, 260000]) {
+    for (const km of [30000, 90000, 150000]) {
+      const b = { finnUtpris: finn, km, modelYear: 2018,
+        bilInfo: { year: 2018, egenvekt: 1500 }, satser, profile: 'a' };
+      const u = ff.computeSharedFossefall(Object.assign({}, b, { statidKr: 0 }));
+      const m = ff.computeSharedFossefall(Object.assign({}, b, { statidKr: -20000 }));
+      if (u.skip || m.skip) continue;
+      if (-m.peasy_avgift.lav < -u.peasy_avgift.lav) kryssetTrinn = true;
+    }
+  }
+  assert.ok(kryssetTrinn, 'fant ingen bil der staatid senket avgiftstrinnet - er trappen koblet til AR-bud?');
+}
 
 console.log('fossefall.test.js ok');
   console.log('  celle', a.celleId, 'midt', a.peasy_bud_mid, 'lav/hoy', a.lav, a.hoy);

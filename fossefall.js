@@ -11,7 +11,7 @@
  * Deretter vrakpant-gulv på midt, lav og høy. AR-bud ≤ 0 er ikke PRIS MANUELT.
  * celleId = prisbånd|kmbånd (Pulse-aksene).
  * v20.144: ett tall, så ett spenn, så profil som merkelapp.
- * Finn → margin → takst → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
+ * Finn → margin → takst → ståtid → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
  * Spenn-tabellens ned|opp legges rundt den samme midten → lav/høy.
  * Locked: ett fossefall → midt A; B = A×0.9; Ordna = A×0.75; Spenn-tabell lav/høy per midt.
  * STATID_A_LIVE (default på): ståtid inngår i peasy-bud-midt og kopieres til alle armer. Den klemmes ikke av margin-maks.
@@ -20,7 +20,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.151';
+const FOSSEFALL_VERSION = 'v20.152';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -736,7 +736,7 @@ function skipArm(profile, grunn) {
 
 /**
  * Ett fossefall. Profilen er bare hvilken arm som vises.
- * Finn − forhandlermargin − avsetning takst − omreg − klargjøring 1000 = AR-bud
+ * Finn − forhandlermargin − avsetning takst + ståtid − omreg − klargjøring 1000 = AR-bud
  * AR-bud − peasyFee = én peasyBud (midt). Ingen profil-skalering.
  * Spenn ned|opp legges rundt den avrundede midten → lav/høy.
  * Ståtid (samme beløp på alle armer når den er på) ligger i midten, etter fee, og klemmes ikke av margin-maks.
@@ -775,10 +775,14 @@ function computeSharedFossefall(opts) {
   const opp = looked.spenn.opp;
   const statidKr = Number(opts.statidKr) || 0;
 
-  const arBud = finn - margin - takst - omregKr - KLARGJORING_KR;
+  // v20.152: ståtid inn i AR-bud, over Peasy-avgiften. Fossefallet er
+  //   Finn → margin → takst → ståtid → omreg → klargjøring → avgift → A-midt
+  // Avgiften er en trapp slått opp på AR-bud, så ståtid må ligge over den.
+  // Lå den under, kunne en bil med ståtidskostnad havne i for høyt avgiftstrinn.
+  const arBud = finn - margin - takst + statidKr - omregKr - KLARGJORING_KR;
   const fee = peasyFee(arBud);
-  // Ståtid etter fee, inne i den ene midten. Rund midt først, så lav/høy fra den midten ± spenn.
-  const midRaw = arBud - fee + statidKr;
+  // Rund midt først, så lav/høy fra den midten ± spenn.
+  const midRaw = arBud - fee;
   const peasyBudMid = roundKr(midRaw);
   const lav = peasyBudMid - ned;
   const hoy = peasyBudMid + opp;
