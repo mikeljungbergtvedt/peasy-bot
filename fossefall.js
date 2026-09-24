@@ -20,7 +20,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.150';
+const FOSSEFALL_VERSION = 'v20.151';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -1131,13 +1131,48 @@ function buildFossefall(opts) {
       version: FOSSEFALL_VERSION,
     };
   }
-  return Object.assign({}, legacy, {
+  // Bevisst luke: FOSSEFALL_HARDCODED_FALLBACK satt OG satsene lot seg ikke
+  // laste. Da prises bilen pa gammel motor, som for.
+  if (live && !sharedOk && allowHardcoded) {
+    return Object.assign({}, legacy, {
+      fossefall_v2: shared,
+      tables_live: false,
+      engine: 'hardcoded-fallback',
+      pris_manuelt: false,
+      version: FOSSEFALL_VERSION,
+    });
+  }
+
+  // v20.151: tabellene er slatt av (FOSSEFALL_TABLES_LIVE ikke satt).
+  // Tidligere returnerte vi legacy-tallene her som om de var gyldige bud.
+  // Legacy kjorer tre uavhengige fossefall med egne satser per arm, og kan
+  // gi B hoyere enn A - det skjedde for BS61175 23.09 kl. 17:49 (A 21 000,
+  // B 29 000) uten at noe varslet. Na arkiveres legacy i fossefall_legacy,
+  // og bilen gar til manuell prising i stedet.
+  const offGrunn = 'fossefall-tabeller av';
+  return {
+    a: skipArm('a', offGrunn),
+    b: skipArm('b', offGrunn),
+    ordna: skipArm('ordna', offGrunn),
+    a_statid: null,
+    statid_median_days: shared.statid_median_days != null ? shared.statid_median_days : legacy.statid_median_days,
+    statid_n_comps: shared.statid_n_comps != null ? shared.statid_n_comps : legacy.statid_n_comps,
+    statid_grunn: shared.statid_grunn != null ? shared.statid_grunn : legacy.statid_grunn,
+    statid_manuell: shared.statid_manuell != null ? shared.statid_manuell : legacy.statid_manuell,
+    statid_kr: shared.statid_kr != null ? shared.statid_kr : legacy.statid_kr,
+    statid_a_live: shared.statid_a_live != null ? shared.statid_a_live : legacy.statid_a_live,
     fossefall_v2: shared,
+    fossefall_legacy: legacy,
     tables_live: false,
-    engine: live ? 'hardcoded-fallback' : 'hardcoded',
-    pris_manuelt: false,
+    engine: 'fossefallSatser',
+    pris_manuelt: true,
+    signal: 'PRIS MANUELT',
+    grunn: offGrunn,
+    price_id: shared.price_id || null,
+    km_id: shared.km_id || null,
+    celleId: shared.celleId || (shared.a && shared.a.celleId) || null,
     version: FOSSEFALL_VERSION,
-  });
+  };
 }
 
 module.exports = {

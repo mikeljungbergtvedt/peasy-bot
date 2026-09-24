@@ -5,7 +5,7 @@
 const assert = require('assert');
 const ff = require('./fossefall');
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.150');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.151');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -165,13 +165,26 @@ const outside = ff.computeSharedFossefall(Object.assign(ctx(), { finnUtpris: 500
 assert.strictEqual(outside.skip, true);
 assert.strictEqual(outside.signal, 'PRIS MANUELT');
 
-// Default: gammel motor på a/b/ordna (Easy-klarg 5000), ny motor i fossefall_v2
+// v20.151: tabeller av => PRIS MANUELT. Legacy arkiveres, prises ikke.
 delete process.env.FOSSEFALL_TABLES_LIVE;
 delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
 const shadow = ff.buildFossefall(ctx());
 assert.strictEqual(shadow.tables_live, false);
-assert.strictEqual(shadow.engine, 'hardcoded');
-assert.strictEqual(shadow.a.klargjoring, -5000);
+assert.strictEqual(shadow.engine, 'fossefallSatser');
+assert.strictEqual(shadow.pris_manuelt, true);
+assert.strictEqual(shadow.signal, 'PRIS MANUELT');
+assert.strictEqual(shadow.grunn, 'fossefall-tabeller av');
+assert.strictEqual(shadow.a.signal, 'PRIS MANUELT');
+assert.strictEqual(shadow.b.signal, 'PRIS MANUELT');
+assert.strictEqual(shadow.ordna.signal, 'PRIS MANUELT');
+// Ingen arm far presentere et bud nar tabellene er av.
+for (const arm of ['a', 'b', 'ordna']) {
+  assert.strictEqual(shadow[arm].skip, true, arm + ' skal vaere skip');
+  assert.ok(shadow[arm].peasy_bud_mid == null, arm + ' skal ikke ha bud');
+}
+// Legacy er arkivert og lesbar, men brukes ikke som bud.
+assert.ok(shadow.fossefall_legacy && shadow.fossefall_legacy.a);
+assert.strictEqual(shadow.fossefall_legacy.a.klargjoring, -5000);
 assert.strictEqual(shadow.fossefall_v2.a.klargjoring, -1000);
 assert.strictEqual(shadow.fossefall_v2.b.peasy_bud_mid, ff._internal.roundKr(shadow.fossefall_v2.a.peasy_bud_mid * 0.9));
 assert.strictEqual(shadow.fossefall_v2.ordna.peasy_bud_mid, ff._internal.roundKr(shadow.fossefall_v2.a.peasy_bud_mid * 0.75));
@@ -180,7 +193,6 @@ assert.notStrictEqual(shadow.fossefall_v2.a.peasy_bud_mid, shadow.fossefall_v2.b
 assert.notStrictEqual(shadow.fossefall_v2.a.peasy_bud_mid, shadow.fossefall_v2.ordna.peasy_bud_mid);
 assert.strictEqual(shadow.fossefall_v2.b.lav, shadow.fossefall_v2.b.peasy_bud_mid - 20000);
 assert.strictEqual(shadow.fossefall_v2.ordna.hoy, shadow.fossefall_v2.ordna.peasy_bud_mid + 13000);
-assert.strictEqual(ff.verifyLag(shadow.a).ok, true, JSON.stringify(ff.verifyLag(shadow.a)));
 assert.strictEqual(ff.verifyLag(shadow.fossefall_v2.a).ok, true, JSON.stringify(ff.verifyLag(shadow.fossefall_v2.a)));
 // B/Ordna are midt-scaled copies; layer sum is A's — verifyLag only for A.
 
@@ -329,7 +341,34 @@ delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
   });
   assert.strictEqual(calls, 1);
   ff._internal.resetSatserCache();
-  console.log('fossefall.test.js ok');
+  // --- v20.151 regresjon: B kan aldri bli hoyere enn A ---
+// BS61175 fikk A 21 000 / B 29 000 fra legacy-stien 23.09. Skal vaere umulig.
+process.env.FOSSEFALL_TABLES_LIVE = '1';
+delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
+for (const finn of [20000, 48000, 90000, 170000, 350000, 900000]) {
+  for (const km of [30000, 90000, 150000, 250000]) {
+    const r = ff.buildFossefall({ finnUtpris: finn, km, modelYear: 2018,
+      bilInfo: { year: 2018, egenvekt: 1500 }, satser });
+    if (r.pris_manuelt) continue;
+    const A = r.a.peasy_bud_mid, B = r.b.peasy_bud_mid, O = r.ordna.peasy_bud_mid;
+    const tag = finn + '/' + km;
+    assert.ok(B <= A, 'B over A for ' + tag + ': A=' + A + ' B=' + B);
+    assert.ok(O <= B, 'Ordna over B for ' + tag + ': B=' + B + ' O=' + O);
+    // Motoren skalerer den URUNDEDE midten, sa B kan avvike inntil 1000 fra
+    // rund(A*0.9). Sjekk forholdet, ikke eksakt likhet.
+    assert.ok(Math.abs(B - A * 0.9) <= 1000, 'B/A ikke 0.9 for ' + tag + ': A=' + A + ' B=' + B);
+    assert.ok(Math.abs(O - A * 0.75) <= 1000, 'Ordna/A ikke 0.75 for ' + tag + ': A=' + A + ' O=' + O);
+    for (const arm of ['a', 'b', 'ordna']) {
+      assert.ok(r[arm].lav >= 3000, 'lav under vrakpantgulv for ' + tag + ' ' + arm);
+      assert.strictEqual(r[arm].avsetning_takst, r.a.avsetning_takst, 'takst avviker for ' + tag + ' ' + arm);
+      assert.strictEqual(r[arm].klargjoring, -1000, 'klargjoring != 1000 for ' + tag + ' ' + arm);
+      assert.deepStrictEqual(r[arm].spenn, r.a.spenn, 'spenn avviker for ' + tag + ' ' + arm);
+    }
+  }
+}
+delete process.env.FOSSEFALL_TABLES_LIVE;
+
+console.log('fossefall.test.js ok');
   console.log('  celle', a.celleId, 'midt', a.peasy_bud_mid, 'lav/hoy', a.lav, a.hoy);
 })().catch((err) => {
   console.error(err);
