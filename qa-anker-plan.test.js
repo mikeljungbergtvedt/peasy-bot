@@ -18,6 +18,9 @@ const sendOk = (ff, arm) => { const a = ff && ff[armKey(arm)]; return !!(a && Nu
   const A = await planQaAnker(Object.assign({}, base, { erpId: 5000, source: null }));
   const B = await planQaAnker(Object.assign({}, base, { erpId: 5001, source: null }));
   const O = await planQaAnker(Object.assign({}, base, { erpId: 5000, source: 'ordna' }));
+  const D = await planQaAnker(Object.assign({}, base, { erpId: 5000, source: 'autodb' }));
+  assert.strictEqual(D.arm, 'O', 'AutoDB skal følge fossefall og Pulse (Ordna)');
+  assert.strictEqual(D.dLav, O.dLav);
   for (const [p, arm, erpId, src] of [[A, 'A', 5000, null], [B, 'B', 5001, null], [O, 'O', 5000, 'ordna']]) {
     assert.strictEqual(p.ok, true, arm + ': ' + p.grunn);
     assert.strictEqual(p.arm, arm);

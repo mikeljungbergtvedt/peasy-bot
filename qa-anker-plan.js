@@ -1,14 +1,15 @@
 'use strict';
 /**
- * qa-anker-plan.js — v20.154
+ * qa-anker-plan.js — v20.155
  * QA → «Sett Finn-pris»: manuell Finn-utpris går gjennom samme fossefall som boten
  * (fossefall.js + satstabellene), med årsmodell og egenvekt så omregistrering blir riktig.
- * Skrivende scenario velges med liveOwner (internnr partall A, oddetall B, Ordna/AutoDB → Ordna).
+ * Skrivende scenario velges med fossefall-card abArm — samme regel som planErpWrite og Pulse
+ * (Ordna og AutoDB → Ordna, ellers internnr partall A / oddetall B).
+ * v20.155: byttet fra ab-arm liveOwner, som gir AutoDB A/B og dermed avvek fra fossefall og Pulse.
  * PRIS MANUELT fra fossefallet → ok:false med grunn. Ingen gammel kalkyle som reserve.
  */
 const { buildFossefall, loadFossefallSatser } = require('./fossefall');
 const fossefallCard = require('./fossefall-card');
-const { liveOwner } = require('./ab-arm.js');
 
 async function planQaAnker(opts) {
   opts = opts || {};
@@ -31,8 +32,7 @@ async function planQaAnker(opts) {
   if (opts.satser) ctx.satser = opts.satser;
   const built = buildFossefall(ctx);
   const card = fossefallCard.cardFromBuilt(built) || built;
-  const owner = liveOwner(opts.erpId, opts.source);
-  const arm = owner === 'ORDNA' ? 'O' : (owner === 'B' ? 'B' : 'A');
+  const arm = fossefallCard.abArm(opts.erpId, opts.source);
   if (!card || card.pris_manuelt) {
     return { ok: false, arm: arm, card: card, grunn: (card && card.grunn) || 'PRIS MANUELT' };
   }
