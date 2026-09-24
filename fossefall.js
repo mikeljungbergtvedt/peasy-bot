@@ -1,9 +1,11 @@
 'use strict';
 /**
- * fossefall.js — v20.153
+ * fossefall.js — v20.154
  * Delbeløp i kroner. Ingen X-faktor.
  * usikkerhet_takst (alias spenn). returtrekk fjernet (var alias/dobbeltbokføring).
  *
+ * v20.154: forhandlermargin = 10 % av bilens egen Finn-utpris, klemt av prisbåndets min/max.
+ *          Margin-matrisen i satsene leses ikke lenger (før: fast kronebeløp per celle, 8–13 % i samme bånd).
  * v20.150: locked scale B=A×0.9 Ordna=A×0.75; absurd midt/Finn → PRIS MANUELT.
  * v20.149: locked scale (Ordna was wrongly ×0.25).
  * v20.146: ståtid inngår i den ene peasy-bud-midten (ikke bare som skift på lav/høy).
@@ -20,7 +22,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.153';
+const FOSSEFALL_VERSION = 'v20.154';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -34,6 +36,8 @@ const PROFILES = {
 
 /** Ny sti. Gammel Easy-sti (computeA) beholder EASY_COST.klargjoring = 5000. */
 const KLARGJORING_KR = 1000;
+/** v20.154: forhandlermargin som andel av bilens egen Finn-utpris. Klemmes av satser.min/max per prisbånd. */
+const MARGIN_PCT = 0.10;
 
 const CONFIG_URL = process.env.PEASY_CONFIG_URL
   || 'https://mikeljungbergtvedt.github.io/peasy-config.json';
@@ -682,7 +686,7 @@ function parseSpenn(v) {
 
 /**
  * Slå opp én celle. Tom/manglende celle → ok:false (ikke nabo, ikke interpolering).
- * margin klemmes med radens min/max når de finnes.
+ * margin = MARGIN_PCT × finn (v20.154), klemt med radens min/max når de finnes.
  */
 function lookupFossefallCell(satser, finn, km) {
   if (!satser || typeof satser !== 'object' || !satser.axes) {
@@ -693,8 +697,7 @@ function lookupFossefallCell(satser, finn, km) {
   const kmBand = findBand(satser.axes.km, km);
   if (!kmBand) return { ok: false, grunn: 'utenfor akser (km)' };
   const cell = priceBand.id + '|' + kmBand.id;
-  const marginRaw = readKr(readCell(satser.margin, priceBand.id, kmBand.id));
-  if (marginRaw == null) return { ok: false, grunn: 'tom celle margin ' + cell, priceId: priceBand.id, kmId: kmBand.id };
+  const marginRaw = Math.round(MARGIN_PCT * finn);
   const takst = readKr(readCell(satser.takst, priceBand.id, kmBand.id));
   if (takst == null) return { ok: false, grunn: 'tom celle takst ' + cell, priceId: priceBand.id, kmId: kmBand.id };
   const spenn = parseSpenn(readCell(satser.spenn, priceBand.id, kmBand.id));
@@ -1186,6 +1189,7 @@ module.exports = {
   ARM_SCALE,
   PROFILES,
   KLARGJORING_KR,
+  MARGIN_PCT,
   CONFIG_URL,
   buildFossefall,
   buildSharedFossefall,

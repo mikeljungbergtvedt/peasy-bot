@@ -5,7 +5,8 @@
 const assert = require('assert');
 const ff = require('./fossefall');
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.153');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.154');
+assert.strictEqual(ff.MARGIN_PCT, 0.10);
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -65,8 +66,9 @@ const cell = ff.lookupFossefallCell(satser, 180000, 80000);
 assert.strictEqual(cell.ok, true);
 assert.strictEqual(cell.priceId, '150-250');
 assert.strictEqual(cell.kmId, '50-120');
-assert.strictEqual(cell.margin, 38000);
-assert.strictEqual(cell.marginRaw, 38000);
+// v20.154: margin = 10 % av finn 180 000 = 18 000 (celle 38 000 leses ikke)
+assert.strictEqual(cell.margin, 18000);
+assert.strictEqual(cell.marginRaw, 18000);
 assert.strictEqual(cell.takst, 13000);
 assert.deepStrictEqual(cell.spenn, { ned: 20000, opp: 13000 });
 assert.strictEqual(cell.marginMin, 13000);
@@ -76,7 +78,9 @@ assert.strictEqual(cell.marginMax, 41000);
 const edge = ff.lookupFossefallCell(satser, 30000, 50000);
 assert.strictEqual(edge.priceId, '30-60');
 assert.strictEqual(edge.kmId, '50-120');
-assert.strictEqual(edge.margin, 10000);
+// 30 000 × 10 % = 3 000 → løftet til bånd-gulv 6 000
+assert.strictEqual(edge.marginRaw, 3000);
+assert.strictEqual(edge.margin, 6000);
 assert.strictEqual(edge.takst, 7000);
 
 // Nestet priceId→kmId leses også (Pulse kan ligge flatt eller nestet)
@@ -89,22 +93,42 @@ const nested = {
   max: satser.max,
 };
 const nestedCell = ff.lookupFossefallCell(nested, 180000, 80000);
-assert.strictEqual(nestedCell.margin, 38000);
+assert.strictEqual(nestedCell.margin, 18000);
 assert.strictEqual(nestedCell.takst, 13000);
 assert.deepStrictEqual(nestedCell.spenn, { ned: 20000, opp: 13000 });
 
-// Klemme: celle over rad-maks blir maks, ikke et nytt tall
+// v20.154: margin-matrisen ignoreres — en absurd celleverdi påvirker ingenting
 const clampSat = JSON.parse(JSON.stringify(satser));
 clampSat.margin['150-250|50-120'] = 999999;
-const clamped = ff.lookupFossefallCell(clampSat, 180000, 80000);
-assert.strictEqual(clamped.marginRaw, 999999);
-assert.strictEqual(clamped.margin, 41000);
+const ignored = ff.lookupFossefallCell(clampSat, 180000, 80000);
+assert.strictEqual(ignored.marginRaw, 18000);
+assert.strictEqual(ignored.margin, 18000);
+
+// Tak: 10 % over bånd-maks klemmes til maks
+const capSat = JSON.parse(JSON.stringify(satser));
+capSat.max['150-250'] = 15000;
+const capped = ff.lookupFossefallCell(capSat, 180000, 80000);
+assert.strictEqual(capped.marginRaw, 18000);
+assert.strictEqual(capped.margin, 15000);
+
+// Gulv: 20 000 × 10 % = 2 000 → bånd-gulv 4 000
+const floored = ff.lookupFossefallCell(satser, 20000, 400000);
+assert.strictEqual(floored.priceId, '10-30');
+assert.strictEqual(floored.marginRaw, 2000);
+assert.strictEqual(floored.margin, 4000);
+
+// Følger bilens pris innenfor samme bånd — ikke fast kronebeløp per celle
+const lo = ff.lookupFossefallCell(satser, 160000, 80000);
+const hi = ff.lookupFossefallCell(satser, 240000, 80000);
+assert.strictEqual(lo.cell, hi.cell);
+assert.strictEqual(lo.margin, 16000);
+assert.strictEqual(hi.margin, 24000);
 
 const a = arm('a');
 const b = arm('b');
 const o = arm('ordna');
 assert.strictEqual(a.skip, false);
-assert.strictEqual(a.forhandlermargin, -38000);
+assert.strictEqual(a.forhandlermargin, -18000);
 assert.strictEqual(a.avsetning_takst, -13000);
 assert.strictEqual(a.klargjoring, -1000);
 assert.strictEqual(b.klargjoring, -1000);
@@ -123,17 +147,18 @@ assert.strictEqual(a.profile, 'a');
 assert.strictEqual(b.profile, 'b');
 assert.strictEqual(o.profile, 'ordna');
 assert.strictEqual(a.profil_mult, undefined);
-// 180k×80k: rå midt 113568 rundes til 114000, deretter spenn 20000|13000.
+// 180k×80k, v20.154: AR-bud 143468 (≤150k → avgift 9900), rå midt 133568 → 134000, spenn 20000|13000.
 assert.strictEqual(ff._internal.roundKr(113500), 114000);
 assert.strictEqual(ff._internal.roundKr(113499), 113000);
 assert.strictEqual(a.peasy_bud_mid, ff._internal.roundKr(a.ar_bud + a.peasy_avgift.lav));
 assert.strictEqual(a.celleId, '150-250|50-120');
 assert.strictEqual(b.celleId, '150-250|50-120');
 assert.strictEqual(o.celleId, '150-250|50-120');
-assert.strictEqual(a.peasy_bud_mid, 114000);
-assert.strictEqual(a.estimertPeasyBud, 114000);
-assert.strictEqual(a.lav, 94000);
-assert.strictEqual(a.hoy, 127000);
+assert.strictEqual(a.ar_bud, 143468);
+assert.strictEqual(a.peasy_bud_mid, 134000);
+assert.strictEqual(a.estimertPeasyBud, 134000);
+assert.strictEqual(a.lav, 114000);
+assert.strictEqual(a.hoy, 147000);
 assert.strictEqual(a.lav, a.peasy_bud_mid - 20000);
 assert.strictEqual(a.hoy, a.peasy_bud_mid + 13000);
 assert.strictEqual(b.lav, a.lav);
@@ -145,15 +170,21 @@ assert.deepStrictEqual(o.ordna_trekk, { lav: 0, hoy: 0 });
 const notAScale = ff.computeSharedFossefall(Object.assign(ctx(), { profile: 0.75 }));
 assert.strictEqual(notAScale.skip, true);
 
-// Tom celle: ingen nabo, ingen autoflyt
+// v20.154: tom margin-celle blokkerer ikke lenger — margin kommer fra finn
 const empty = JSON.parse(JSON.stringify(satser));
 empty.margin['150-250|50-120'] = null;
-const skip = ff.computeSharedFossefall(Object.assign(ctx(), { satser: empty, profile: 'a' }));
+const notSkip = ff.computeSharedFossefall(Object.assign(ctx(), { satser: empty, profile: 'a' }));
+assert.strictEqual(notSkip.skip, false);
+assert.strictEqual(notSkip.forhandlermargin, -18000);
+
+// Tom takst-celle gir fortsatt PRIS MANUELT: ingen nabo, ingen autoflyt
+const emptyT = JSON.parse(JSON.stringify(satser));
+emptyT.takst['150-250|50-120'] = null;
+const skip = ff.computeSharedFossefall(Object.assign(ctx(), { satser: emptyT, profile: 'a' }));
 assert.strictEqual(skip.skip, true);
 assert.strictEqual(skip.signal, 'PRIS MANUELT');
 assert.strictEqual(skip.celleId, '150-250|50-120');
-assert.ok(/tom celle margin/.test(skip.grunn));
-assert.notStrictEqual(skip.forhandlermargin, -24000);
+assert.ok(/tom celle takst/.test(skip.grunn));
 
 const blank = JSON.parse(JSON.stringify(satser));
 blank.spenn['150-250|50-120'] = '';
@@ -217,10 +248,10 @@ assert.strictEqual(live.celleId, '150-250|50-120');
 assert.strictEqual(live.a.celleId, '150-250|50-120');
 assert.strictEqual(live.b.celleId, live.a.celleId);
 assert.strictEqual(live.ordna.celleId, live.a.celleId);
-assert.strictEqual(live.estimertPeasyBud, 114000);
-assert.strictEqual(live.a.peasy_bud_mid, 114000);
-assert.strictEqual(live.lav, 94000);
-assert.strictEqual(live.hoy, 127000);
+assert.strictEqual(live.estimertPeasyBud, 134000);
+assert.strictEqual(live.a.peasy_bud_mid, 134000);
+assert.strictEqual(live.lav, 114000);
+assert.strictEqual(live.hoy, 147000);
 assert.strictEqual(live.a.lav % 1000, 0);
 assert.strictEqual(live.a.hoy % 1000, 0);
 assert.strictEqual(ff.verifyLag(live.a).ok, true, JSON.stringify(ff.verifyLag(live.a)));
@@ -229,15 +260,16 @@ assert.notStrictEqual(live.a.lav, 0);
 assert.ok(live.b.lav < live.a.lav);
 assert.ok(live.ordna.lav < live.b.lav);
 
-// Tom celle mens live: ikke gammel motor, selv med hardcoded fallback
-const liveEmpty = ff.buildFossefall(Object.assign(ctx(), { satser: empty }));
+// Tom celle mens live: ikke gammel motor, selv med hardcoded fallback.
+// v20.154: bruker tom takst-celle — tom margin-celle blokkerer ikke lenger.
+const liveEmpty = ff.buildFossefall(Object.assign(ctx(), { satser: emptyT }));
 assert.strictEqual(liveEmpty.pris_manuelt, true);
 assert.strictEqual(liveEmpty.a.signal, 'PRIS MANUELT');
 assert.strictEqual(liveEmpty.celleId, '150-250|50-120');
 assert.strictEqual(liveEmpty.a.celleId, '150-250|50-120');
 assert.notStrictEqual(liveEmpty.a.klargjoring, -5000);
 process.env.FOSSEFALL_HARDCODED_FALLBACK = '1';
-const liveEmptyFb = ff.buildFossefall(Object.assign(ctx(), { satser: empty }));
+const liveEmptyFb = ff.buildFossefall(Object.assign(ctx(), { satser: emptyT }));
 assert.strictEqual(liveEmptyFb.pris_manuelt, true);
 assert.strictEqual(liveEmptyFb.a.signal, 'PRIS MANUELT');
 
@@ -307,7 +339,7 @@ assert.strictEqual(stood.a.hoy, stood.a.peasy_bud_mid + 13000);
 assert.strictEqual(stood.b.lav, stood.b.peasy_bud_mid - 20000);
 assert.strictEqual(stood.ordna.hoy, stood.ordna.peasy_bud_mid + 13000);
 assert.strictEqual(stood.a.peasy_avgift.lav, live.a.peasy_avgift.lav);
-assert.strictEqual(stood.a.forhandlermargin, -38000);
+assert.strictEqual(stood.a.forhandlermargin, -18000);
 assert.strictEqual(ff.verifyLag(stood.a).ok, true, JSON.stringify(ff.verifyLag(stood.a)));
 assert.ok(stood.a.lav < live.a.lav);
 assert.ok(stood.b.lav < stood.a.lav);
@@ -400,7 +432,9 @@ delete process.env.FOSSEFALL_TABLES_LIVE;
 // Avgiftstrinn skal faktisk kunne falle: finn en bil rett over en trinngrense.
 {
   let kryssetTrinn = false;
-  for (const finn of [60000, 80000, 110000, 140000, 175000, 210000, 260000]) {
+  // v20.154: 200000 lagt til — med margin 10 % av finn gir 200k×90k AR-bud 161468 (11900),
+  // og −20000 ståtid gir 141468 (9900). 210k lander nå 468 kr over grensen og krysser ikke.
+  for (const finn of [60000, 80000, 110000, 140000, 175000, 200000, 210000, 260000]) {
     for (const km of [30000, 90000, 150000]) {
       const b = { finnUtpris: finn, km, modelYear: 2018,
         bilInfo: { year: 2018, egenvekt: 1500 }, satser, profile: 'a' };
