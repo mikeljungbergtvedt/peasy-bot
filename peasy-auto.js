@@ -111,7 +111,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.151'; // locked midt A; B=A×0.9; Ordna=A×0.75; writing-arm fossefall lav
+const VERSION = 'v20.154'; // QA Sett Finn-pris går gjennom fossefallet (qa-anker-plan.js); locked midt A; B=A×0.9; Ordna=A×0.75
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -4249,26 +4249,21 @@ async function main() {
       if (!target || !target.id) throw new Error('Bil ikke i liste 3 (final_estimate)');
       const erpId = target.id;
       const source = target.source || payload.source || null;
-      const { v3gShouldWrite, liveOwner } = require('./ab-arm.js');
-      if (v3gShouldWrite(erpId, source)) {
-        const { setV3gAnker } = await import('./v3g/v3g-set-anker.js');
-        const out = await setV3gAnker({ regnr, erpId, anker });
-        log('[qa-anker] V3G ' + regnr + ' anker=' + anker + ' ' + JSON.stringify(out));
-        if (out && out.ok) {
-          try { addToCache(cache, erpId); } catch (eCch) { logErr('qa-anker cache', eCch); }
-        }
-        return out;
-      }
+      const { liveOwner } = require('./ab-arm.js');
       const km = Number(target.mileage || payload.km || 0) || 0;
       const year = Number(target.model_year || (target.drive_no_car_data && target.drive_no_car_data.model_year) || 0) || 0;
-      const seg = identifySegment(year, km);
       const d = _evalDataMap[erpId];
-      const nyVal = calcValuation(anker, (d && d.segment) || seg.segment, [], {
-        km, year, anker, regnr,
-        egenvekt: d && d.bil && d.bil.egenvekt,
-        isVarebil: !!(d && d.vegData && (d.vegData.isVarebil || /varebil/i.test(d.vegData.avgiftsgruppe || ''))),
-        avgiftsgruppe: d && d.vegData && d.vegData.avgiftsgruppe
-      });
+      const egenvekt = (d && d.bil && d.bil.egenvekt) || target.egenvekt || null;
+      // v20.154: manuell Finn-utpris går gjennom fossefallet (tabellene) for A, B og Ordna.
+      // Før: calcValuation (A) og setV3gAnker (B/Ordna), og målingen manglet årsmodell → omreg for 2020 → PRIS MANUELT i Pulse.
+      const { planQaAnker } = require('./qa-anker-plan');
+      const plan = await planQaAnker({ anker, km, year, egenvekt, erpId, source,
+        isVarebil: !!(d && d.vegData && (d.vegData.isVarebil || /varebil/i.test(d.vegData.avgiftsgruppe || ''))) });
+      if (!plan.ok) {
+        log('[qa-anker] ' + regnr + ' anker=' + anker + ' PRIS MANUELT: ' + plan.grunn);
+        return { ok: false, err: 'PRIS MANUELT — ' + plan.grunn, regnr, erpId, anker, arm: plan.arm || null };
+      }
+      const nyVal = { dLav: plan.dLav, dHoy: plan.dHoy, auctionTypeId: plan.auctionTypeId };
       const anyDebts = d && d.anyDebts;
       const brreg = (d && d.brreg) || { anyDebts: !!anyDebts, text: '' };
       const ok = await writeToERP(erpId, nyVal.dLav, nyVal.dHoy, nyVal.auctionTypeId, !!anyDebts, brreg, tok, anker);
@@ -4281,6 +4276,9 @@ async function main() {
             finn_utpris: anker,
             dLav: nyVal.dLav,
             dHoy: nyVal.dHoy,
+            model_year: year || null,
+            egenvekt: egenvekt,
+            source: source,
             anker_kilde: 'qa',
             begrunnelse_kort: 'QA manuell Finn-utpris',
             chefs: { merge: { finn_utpris: anker, method: 'qa', begrunnelse: 'QA manuell Finn-utpris' } },
@@ -4288,20 +4286,22 @@ async function main() {
         });
       } catch (eM) { logErr('qa-anker meas', eM); }
       try { addToCache(cache, erpId); } catch (eCch) { logErr('qa-anker cache', eCch); }
+      try { if (typeof _bilCache !== 'undefined' && _bilCache) _bilCache.delete(regnr); } catch (_) {}
       try { await pushEasyOverride(regnr, erpId, anker, nyVal); } catch (eOv) { logErr('qa-anker override', eOv); }
       try {
         await maybePostToChat(target, erpId, 'ENDRE ANKER FRA QA ' + regnr + '\nANKER ' + anker + '\nD lav ' + nyVal.dLav + '\nD høy ' + nyVal.dHoy, tok);
       } catch (eC) { logErr('qa-anker kort', eC); }
-      log('[qa-anker] Easy ' + regnr + ' anker=' + anker + ' dLav=' + nyVal.dLav + ' dHoy=' + nyVal.dHoy);
+      log('[qa-anker] fossefall ' + plan.arm + ' ' + regnr + ' anker=' + anker + ' dLav=' + nyVal.dLav + ' dHoy=' + nyVal.dHoy);
       return {
         ok: true,
         regnr,
         erpId,
         owner: liveOwner(erpId, source),
+        arm: plan.arm,
         anker,
         dLav: nyVal.dLav,
         dHoy: nyVal.dHoy,
-        kalkyle: 'standard',
+        kalkyle: 'fossefall',
       };
     });
     wh.setReevalFn(async function(payload) {
