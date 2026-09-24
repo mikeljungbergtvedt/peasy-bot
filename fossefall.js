@@ -1,26 +1,31 @@
 'use strict';
 /**
- * fossefall.js — v20.146
+ * fossefall.js — v20.153
  * Delbeløp i kroner. Ingen X-faktor.
  * usikkerhet_takst (alias spenn). returtrekk fjernet (var alias/dobbeltbokføring).
  *
+ * v20.150: locked scale B=A×0.9 Ordna=A×0.75; absurd midt/Finn → PRIS MANUELT.
+ * v20.149: locked scale (Ordna was wrongly ×0.25).
  * v20.146: ståtid inngår i den ene peasy-bud-midten (ikke bare som skift på lav/høy).
  * Midt rundes til hele 1000 først (half up). Lav/høy = den midten ∓ spenn.
  * Deretter vrakpant-gulv på midt, lav og høy. AR-bud ≤ 0 er ikke PRIS MANUELT.
  * celleId = prisbånd|kmbånd (Pulse-aksene).
  * v20.144: ett tall, så ett spenn, så profil som merkelapp.
- * Finn → margin → takst → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
+ * Finn → margin → takst → ståtid → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
  * Spenn-tabellens ned|opp legges rundt den samme midten → lav/høy.
- * A / B / Ordna viser den samme midten og det samme intervallet. De skalerer ikke (ikke ×1.00 / ×0.90 / ×0.75).
+ * Locked: ett fossefall → midt A; B = A×0.9; Ordna = A×0.75; Spenn-tabell lav/høy per midt.
  * STATID_A_LIVE (default på): ståtid inngår i peasy-bud-midt og kopieres til alle armer. Den klemmes ikke av margin-maks.
  * FOSSEFALL_TABLES_LIVE=1: a/b/ordna kommer fra tabellene.
  * Default (flagget av): gammel computeA/computeBand blir stående; ny motor ligger i fossefall_v2.
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.146';
+const FOSSEFALL_VERSION = 'v20.153';
 
-/** Merkelapp for Softteam. Ingen multiplikator — alle armer deler én midt og ett spenn. */
+/** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
+const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
+
+/** Merkelapp. Skala ligger i ARM_SCALE (ikke i profilen). */
 const PROFILES = {
   a: { id: 'a', label: 'snill' },
   b: { id: 'b', label: 'tro' },
@@ -60,7 +65,7 @@ const MARGIN_TABLE = [
 ];
 
 const SPREAD = { normal: 0.05, highkm: 0.075 };
-const ORDNA_KALKYLE_MULT = 0.75;
+const ORDNA_KALKYLE_MULT = 0.75; // locked Ordna = A×0.75
 const V3G_RETUR_MULT = 0.90;
 
 function statidALive() {
@@ -258,6 +263,9 @@ function computeA(finn, bilInfo, originCapInfo) {
     peasy_avgift: { lav: -feeLav, hoy: -feeHoy },
     lav: dLav,
     hoy: dHoy,
+    peasy_bud_mid: roundKr((dLav + dHoy) / 2),
+    estimertPeasyBud: roundKr((dLav + dHoy) / 2),
+    midt: roundKr((dLav + dHoy) / 2),
     _meta: { paakost: paakostHoy, dLavRaw, dHoyRaw, vrakpant: false },
   };
 
@@ -349,6 +357,9 @@ function computeBand(finn, km, modelYear, mult, kind, originCapInfo) {
     peasy_avgift: { lav: -fee, hoy: -fee },
     lav: lavAfter,
     hoy: hoyFixed,
+    peasy_bud_mid: roundKr((lavAfter + hoyFixed) / 2),
+    estimertPeasyBud: roundKr((lavAfter + hoyFixed) / 2),
+    midt: roundKr((lavAfter + hoyFixed) / 2),
     _meta: { dMid, spread, segment, dLavStd, dHoyStd, mult, segMod },
   };
   return lag;
@@ -725,7 +736,7 @@ function skipArm(profile, grunn) {
 
 /**
  * Ett fossefall. Profilen er bare hvilken arm som vises.
- * Finn − forhandlermargin − avsetning takst − omreg − klargjøring 1000 = AR-bud
+ * Finn − forhandlermargin − avsetning takst + ståtid − omreg − klargjøring 1000 = AR-bud
  * AR-bud − peasyFee = én peasyBud (midt). Ingen profil-skalering.
  * Spenn ned|opp legges rundt den avrundede midten → lav/høy.
  * Ståtid (samme beløp på alle armer når den er på) ligger i midten, etter fee, og klemmes ikke av margin-maks.
@@ -764,10 +775,14 @@ function computeSharedFossefall(opts) {
   const opp = looked.spenn.opp;
   const statidKr = Number(opts.statidKr) || 0;
 
-  const arBud = finn - margin - takst - omregKr - KLARGJORING_KR;
+  // v20.152: ståtid inn i AR-bud, over Peasy-avgiften. Fossefallet er
+  //   Finn → margin → takst → ståtid → omreg → klargjøring → avgift → A-midt
+  // Avgiften er en trapp slått opp på AR-bud, så ståtid må ligge over den.
+  // Lå den under, kunne en bil med ståtidskostnad havne i for høyt avgiftstrinn.
+  const arBud = finn - margin - takst + statidKr - omregKr - KLARGJORING_KR;
   const fee = peasyFee(arBud);
-  // Ståtid etter fee, inne i den ene midten. Rund midt først, så lav/høy fra den midten ± spenn.
-  const midRaw = arBud - fee + statidKr;
+  // Rund midt først, så lav/høy fra den midten ± spenn.
+  const midRaw = arBud - fee;
   const peasyBudMid = roundKr(midRaw);
   const lav = peasyBudMid - ned;
   const hoy = peasyBudMid + opp;
@@ -787,6 +802,8 @@ function computeSharedFossefall(opts) {
     km_id: looked.kmId,
     celleId,
     ar_bud: arBud,
+    ar_bid_est: arBud,
+    ar_bud_est: arBud,
     estimertPeasyBud: peasyBudMid,
     peasy_bud_mid: peasyBudMid,
     finn_utpris: finn,
@@ -891,14 +908,13 @@ function buildSharedFossefall(opts) {
     originCapInfo,
   };
   const statidKr = live ? statid.kr : 0;
+  // Locked: one fossefall → midt A; B/Ordna = scale × midt; same Spenn ned|opp per midt.
   const aRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'a', statidKr }));
-  const bRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'b', statidKr }));
-  const oRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'ordna', statidKr }));
 
-  if (aRaw.skip || bRaw.skip || oRaw.skip) {
-    const grunn = aRaw.grunn || bRaw.grunn || oRaw.grunn;
+  if (aRaw.skip) {
+    const grunn = aRaw.grunn || 'PRIS MANUELT';
     return {
-      a: aRaw, b: bRaw, ordna: oRaw,
+      a: aRaw, b: skipArm('b', grunn), ordna: skipArm('ordna', grunn),
       pris_manuelt: true, signal: 'PRIS MANUELT', grunn, engine: 'fossefallSatser',
       price_id: looked.priceId || null,
       km_id: looked.kmId || null,
@@ -906,8 +922,60 @@ function buildSharedFossefall(opts) {
     };
   }
 
-  // Gulv etter at midt er rundet og lav/høy er midt ± spenn. Ingen ny tusen-runding etter gulvet.
+  // Never ship absurd table hits (e.g. Finn 65k → midt 4k) as normal.
+  const midA0 = Number(aRaw.peasy_bud_mid != null ? aRaw.peasy_bud_mid : aRaw.estimertPeasyBud);
+  if (Number.isFinite(finn) && finn >= 20000 && Number.isFinite(midA0) && midA0 > 0 && midA0 < finn * 0.15) {
+    const grunn = 'absurd midt/Finn (' + Math.round(midA0) + '/' + Math.round(finn) + ') — PRIS MANUELT (sjekk satser)';
+    const stamp = (profile) => {
+      const arm = skipArm(profile, grunn);
+      arm.celleId = celleIdOf(looked) || aRaw.celleId || null;
+      if (looked.priceId) arm.price_id = looked.priceId;
+      if (looked.kmId) arm.km_id = looked.kmId;
+      return arm;
+    };
+    return {
+      a: stamp('a'), b: stamp('b'), ordna: stamp('ordna'),
+      pris_manuelt: true, signal: 'PRIS MANUELT', grunn, engine: 'fossefallSatser',
+      price_id: looked.priceId || null, km_id: looked.kmId || null,
+      celleId: celleIdOf(looked) || aRaw.celleId || null,
+      alert: 'ABSURD_MIDT_FINN',
+    };
+  }
+
+  function scaleArmFromA(aArm, profileId) {
+    const scale = ARM_SCALE[profileId];
+    if (scale == null) return skipArm(profileId, 'ukjent profil');
+    if (profileId === 'a' || scale === 1) return aArm;
+    const ned = looked.spenn.ned;
+    const opp = looked.spenn.opp;
+    const midA = Number(aArm.peasy_bud_mid != null ? aArm.peasy_bud_mid : aArm.estimertPeasyBud);
+    const mid = roundKr(midA * scale);
+    const out = Object.assign({}, aArm, {
+      profile: profileId,
+      profil: (PROFILES[profileId] && PROFILES[profileId].label) || profileId,
+      peasy_bud_mid: mid,
+      estimertPeasyBud: mid,
+      lav: mid - ned,
+      hoy: mid + opp,
+      usikkerhet_takst: { lav: -ned, hoy: opp },
+      spenn: { lav: -ned, hoy: opp },
+      arm_scale: scale,
+      scaled_from: 'a',
+    });
+    if (out._meta) {
+      out._meta = Object.assign({}, out._meta, {
+        peasyBudMid: mid,
+        arm_scale: scale,
+        midA: midA,
+      });
+    }
+    return out;
+  }
+
+  // Gulv på A først; B/Ordna skaleres fra ferdig A-midt; deretter gulv per arm (kan klemme midt ≥3000).
   applyVrakpantGulv(aRaw);
+  const bRaw = scaleArmFromA(aRaw, 'b');
+  const oRaw = scaleArmFromA(aRaw, 'ordna');
   applyVrakpantGulv(bRaw);
   applyVrakpantGulv(oRaw);
 
@@ -1069,17 +1137,53 @@ function buildFossefall(opts) {
       version: FOSSEFALL_VERSION,
     };
   }
-  return Object.assign({}, legacy, {
+  // Bevisst luke: FOSSEFALL_HARDCODED_FALLBACK satt OG satsene lot seg ikke
+  // laste. Da prises bilen pa gammel motor, som for.
+  if (live && !sharedOk && allowHardcoded) {
+    return Object.assign({}, legacy, {
+      fossefall_v2: shared,
+      tables_live: false,
+      engine: 'hardcoded-fallback',
+      pris_manuelt: false,
+      version: FOSSEFALL_VERSION,
+    });
+  }
+
+  // v20.151: tabellene er slatt av (FOSSEFALL_TABLES_LIVE ikke satt).
+  // Tidligere returnerte vi legacy-tallene her som om de var gyldige bud.
+  // Legacy kjorer tre uavhengige fossefall med egne satser per arm, og kan
+  // gi B hoyere enn A - det skjedde for BS61175 23.09 kl. 17:49 (A 21 000,
+  // B 29 000) uten at noe varslet. Na arkiveres legacy i fossefall_legacy,
+  // og bilen gar til manuell prising i stedet.
+  const offGrunn = 'fossefall-tabeller av';
+  return {
+    a: skipArm('a', offGrunn),
+    b: skipArm('b', offGrunn),
+    ordna: skipArm('ordna', offGrunn),
+    a_statid: null,
+    statid_median_days: shared.statid_median_days != null ? shared.statid_median_days : legacy.statid_median_days,
+    statid_n_comps: shared.statid_n_comps != null ? shared.statid_n_comps : legacy.statid_n_comps,
+    statid_grunn: shared.statid_grunn != null ? shared.statid_grunn : legacy.statid_grunn,
+    statid_manuell: shared.statid_manuell != null ? shared.statid_manuell : legacy.statid_manuell,
+    statid_kr: shared.statid_kr != null ? shared.statid_kr : legacy.statid_kr,
+    statid_a_live: shared.statid_a_live != null ? shared.statid_a_live : legacy.statid_a_live,
     fossefall_v2: shared,
+    fossefall_legacy: legacy,
     tables_live: false,
-    engine: live ? 'hardcoded-fallback' : 'hardcoded',
-    pris_manuelt: false,
+    engine: 'fossefallSatser',
+    pris_manuelt: true,
+    signal: 'PRIS MANUELT',
+    grunn: offGrunn,
+    price_id: shared.price_id || null,
+    km_id: shared.km_id || null,
+    celleId: shared.celleId || (shared.a && shared.a.celleId) || null,
     version: FOSSEFALL_VERSION,
-  });
+  };
 }
 
 module.exports = {
   FOSSEFALL_VERSION,
+  ARM_SCALE,
   PROFILES,
   KLARGJORING_KR,
   CONFIG_URL,

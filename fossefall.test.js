@@ -5,7 +5,7 @@
 const assert = require('assert');
 const ff = require('./fossefall');
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.146');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.153');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -165,23 +165,36 @@ const outside = ff.computeSharedFossefall(Object.assign(ctx(), { finnUtpris: 500
 assert.strictEqual(outside.skip, true);
 assert.strictEqual(outside.signal, 'PRIS MANUELT');
 
-// Default: gammel motor på a/b/ordna (Easy-klarg 5000), ny motor i fossefall_v2
+// v20.151: tabeller av => PRIS MANUELT. Legacy arkiveres, prises ikke.
 delete process.env.FOSSEFALL_TABLES_LIVE;
 delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
 const shadow = ff.buildFossefall(ctx());
 assert.strictEqual(shadow.tables_live, false);
-assert.strictEqual(shadow.engine, 'hardcoded');
-assert.strictEqual(shadow.a.klargjoring, -5000);
+assert.strictEqual(shadow.engine, 'fossefallSatser');
+assert.strictEqual(shadow.pris_manuelt, true);
+assert.strictEqual(shadow.signal, 'PRIS MANUELT');
+assert.strictEqual(shadow.grunn, 'fossefall-tabeller av');
+assert.strictEqual(shadow.a.signal, 'PRIS MANUELT');
+assert.strictEqual(shadow.b.signal, 'PRIS MANUELT');
+assert.strictEqual(shadow.ordna.signal, 'PRIS MANUELT');
+// Ingen arm far presentere et bud nar tabellene er av.
+for (const arm of ['a', 'b', 'ordna']) {
+  assert.strictEqual(shadow[arm].skip, true, arm + ' skal vaere skip');
+  assert.ok(shadow[arm].peasy_bud_mid == null, arm + ' skal ikke ha bud');
+}
+// Legacy er arkivert og lesbar, men brukes ikke som bud.
+assert.ok(shadow.fossefall_legacy && shadow.fossefall_legacy.a);
+assert.strictEqual(shadow.fossefall_legacy.a.klargjoring, -5000);
 assert.strictEqual(shadow.fossefall_v2.a.klargjoring, -1000);
-assert.strictEqual(shadow.fossefall_v2.a.peasy_bud_mid, shadow.fossefall_v2.b.peasy_bud_mid);
-assert.strictEqual(shadow.fossefall_v2.b.peasy_bud_mid, shadow.fossefall_v2.ordna.peasy_bud_mid);
+assert.strictEqual(shadow.fossefall_v2.b.peasy_bud_mid, ff._internal.roundKr(shadow.fossefall_v2.a.peasy_bud_mid * 0.9));
+assert.strictEqual(shadow.fossefall_v2.ordna.peasy_bud_mid, ff._internal.roundKr(shadow.fossefall_v2.a.peasy_bud_mid * 0.75));
 assert.strictEqual(shadow.fossefall_v2.estimertPeasyBud, shadow.fossefall_v2.a.peasy_bud_mid);
-assert.strictEqual(shadow.fossefall_v2.a.lav, shadow.fossefall_v2.b.lav);
-assert.strictEqual(shadow.fossefall_v2.b.hoy, shadow.fossefall_v2.ordna.hoy);
-assert.strictEqual(ff.verifyLag(shadow.a).ok, true, JSON.stringify(ff.verifyLag(shadow.a)));
+assert.notStrictEqual(shadow.fossefall_v2.a.peasy_bud_mid, shadow.fossefall_v2.b.peasy_bud_mid);
+assert.notStrictEqual(shadow.fossefall_v2.a.peasy_bud_mid, shadow.fossefall_v2.ordna.peasy_bud_mid);
+assert.strictEqual(shadow.fossefall_v2.b.lav, shadow.fossefall_v2.b.peasy_bud_mid - 20000);
+assert.strictEqual(shadow.fossefall_v2.ordna.hoy, shadow.fossefall_v2.ordna.peasy_bud_mid + 13000);
 assert.strictEqual(ff.verifyLag(shadow.fossefall_v2.a).ok, true, JSON.stringify(ff.verifyLag(shadow.fossefall_v2.a)));
-assert.strictEqual(ff.verifyLag(shadow.fossefall_v2.b).ok, true, JSON.stringify(ff.verifyLag(shadow.fossefall_v2.b)));
-assert.strictEqual(ff.verifyLag(shadow.fossefall_v2.ordna).ok, true, JSON.stringify(ff.verifyLag(shadow.fossefall_v2.ordna)));
+// B/Ordna are midt-scaled copies; layer sum is A's — verifyLag only for A.
 
 // Live: a/b/ordna er tabellmotoren, klarg 1000
 process.env.FOSSEFALL_TABLES_LIVE = '1';
@@ -191,11 +204,13 @@ assert.strictEqual(live.engine, 'fossefallSatser');
 assert.strictEqual(live.a.klargjoring, -1000);
 assert.strictEqual(live.b.klargjoring, -1000);
 assert.strictEqual(live.ordna.klargjoring, -1000);
-assert.strictEqual(live.a.peasy_bud_mid, live.b.peasy_bud_mid);
-assert.strictEqual(live.b.peasy_bud_mid, live.ordna.peasy_bud_mid);
+assert.strictEqual(live.b.peasy_bud_mid, ff._internal.roundKr(live.a.peasy_bud_mid * 0.9));
+assert.strictEqual(live.ordna.peasy_bud_mid, ff._internal.roundKr(live.a.peasy_bud_mid * 0.75));
 assert.strictEqual(live.estimertPeasyBud, live.a.peasy_bud_mid);
-assert.strictEqual(live.a.lav, live.b.lav);
-assert.strictEqual(live.a.hoy, live.ordna.hoy);
+assert.notStrictEqual(live.a.peasy_bud_mid, live.b.peasy_bud_mid);
+assert.notStrictEqual(live.a.peasy_bud_mid, live.ordna.peasy_bud_mid);
+assert.strictEqual(live.b.lav, live.b.peasy_bud_mid - 20000);
+assert.strictEqual(live.ordna.hoy, live.ordna.peasy_bud_mid + 13000);
 assert.strictEqual(live.lav, live.a.lav);
 assert.strictEqual(live.hoy, live.a.hoy);
 assert.strictEqual(live.celleId, '150-250|50-120');
@@ -211,6 +226,8 @@ assert.strictEqual(live.a.hoy % 1000, 0);
 assert.strictEqual(ff.verifyLag(live.a).ok, true, JSON.stringify(ff.verifyLag(live.a)));
 assert.ok(live.a.lav >= 3000 && live.a.hoy >= 5000);
 assert.notStrictEqual(live.a.lav, 0);
+assert.ok(live.b.lav < live.a.lav);
+assert.ok(live.ordna.lav < live.b.lav);
 
 // Tom celle mens live: ikke gammel motor, selv med hardcoded fallback
 const liveEmpty = ff.buildFossefall(Object.assign(ctx(), { satser: empty }));
@@ -256,8 +273,8 @@ assert.ok(low.a.peasy_bud_mid >= 0, 'midt negativ ' + low.a.peasy_bud_mid);
 assert.ok(low.b.peasy_bud_mid >= 3000, 'b midt ' + low.b.peasy_bud_mid);
 assert.ok(low.ordna.peasy_bud_mid >= 3000, 'ordna midt ' + low.ordna.peasy_bud_mid);
 assert.strictEqual(low.estimertPeasyBud, low.a.peasy_bud_mid);
-assert.strictEqual(low.a.peasy_bud_mid, low.b.peasy_bud_mid);
-assert.strictEqual(low.b.peasy_bud_mid, low.ordna.peasy_bud_mid);
+assert.strictEqual(low.b.peasy_bud_mid, Math.max(3000, ff._internal.roundKr(low.a.peasy_bud_mid * 0.9)));
+assert.strictEqual(low.ordna.peasy_bud_mid, Math.max(3000, ff._internal.roundKr(low.a.peasy_bud_mid * 0.75)));
 assert.ok(low.a.lav >= 3000, 'lav ' + low.a.lav);
 assert.ok(low.a.hoy >= 5000, 'hoy ' + low.a.hoy);
 assert.ok(low.b.lav >= 3000 && low.ordna.lav >= 3000);
@@ -267,8 +284,6 @@ assert.notStrictEqual(low.b.lav, 0);
 assert.notStrictEqual(low.ordna.lav, 0);
 assert.strictEqual(low.celleId, '10-30|o300');
 assert.strictEqual(ff.verifyLag(low.a).ok, true, JSON.stringify(ff.verifyLag(low.a)));
-assert.strictEqual(ff.verifyLag(low.b).ok, true, JSON.stringify(ff.verifyLag(low.b)));
-assert.strictEqual(ff.verifyLag(low.ordna).ok, true, JSON.stringify(ff.verifyLag(low.ordna)));
 
 // Ståtid inngår i det ene estimatet (alle armer like). Den klemmes ikke inn i margin-maks.
 const stood = ff.buildFossefall(Object.assign(ctx(), {
@@ -278,23 +293,24 @@ const stood = ff.buildFossefall(Object.assign(ctx(), {
 assert.ok(stood.a.statid < 0, 'statid ' + stood.a.statid);
 assert.strictEqual(stood.b.statid, stood.a.statid);
 assert.strictEqual(stood.ordna.statid, stood.a.statid);
-assert.strictEqual(stood.a.peasy_bud_mid, stood.b.peasy_bud_mid);
-assert.strictEqual(stood.b.peasy_bud_mid, stood.ordna.peasy_bud_mid);
+assert.strictEqual(stood.b.peasy_bud_mid, ff._internal.roundKr(stood.a.peasy_bud_mid * 0.9));
+assert.strictEqual(stood.ordna.peasy_bud_mid, ff._internal.roundKr(stood.a.peasy_bud_mid * 0.75));
 assert.strictEqual(stood.estimertPeasyBud, stood.a.peasy_bud_mid);
 assert.notStrictEqual(stood.a.peasy_bud_mid, live.a.peasy_bud_mid);
+// v20.153: staatid ligger inne i ar_bud, ikke lagt pa etter avgiften.
 assert.strictEqual(
   stood.a.peasy_bud_mid,
-  ff._internal.roundKr(stood.a.ar_bud + stood.a.peasy_avgift.lav + stood.a.statid)
+  ff._internal.roundKr(stood.a.ar_bud + stood.a.peasy_avgift.lav)
 );
 assert.strictEqual(stood.a.lav, stood.a.peasy_bud_mid - 20000);
 assert.strictEqual(stood.a.hoy, stood.a.peasy_bud_mid + 13000);
-assert.strictEqual(stood.a.lav, stood.b.lav);
-assert.strictEqual(stood.a.hoy, stood.ordna.hoy);
+assert.strictEqual(stood.b.lav, stood.b.peasy_bud_mid - 20000);
+assert.strictEqual(stood.ordna.hoy, stood.ordna.peasy_bud_mid + 13000);
 assert.strictEqual(stood.a.peasy_avgift.lav, live.a.peasy_avgift.lav);
 assert.strictEqual(stood.a.forhandlermargin, -38000);
 assert.strictEqual(ff.verifyLag(stood.a).ok, true, JSON.stringify(ff.verifyLag(stood.a)));
-assert.strictEqual(ff.verifyLag(stood.b).ok, true, JSON.stringify(ff.verifyLag(stood.b)));
 assert.ok(stood.a.lav < live.a.lav);
+assert.ok(stood.b.lav < stood.a.lav);
 
 // Spenn som ikke er hele tusen: lav/høy følger avrundet midt, de rundes ikke hver for seg.
 const oddSpenn = JSON.parse(JSON.stringify(satser));
@@ -326,7 +342,78 @@ delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
   });
   assert.strictEqual(calls, 1);
   ff._internal.resetSatserCache();
-  console.log('fossefall.test.js ok');
+  // --- v20.151 regresjon: B kan aldri bli hoyere enn A ---
+// BS61175 fikk A 21 000 / B 29 000 fra legacy-stien 23.09. Skal vaere umulig.
+process.env.FOSSEFALL_TABLES_LIVE = '1';
+delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
+for (const finn of [20000, 48000, 90000, 170000, 350000, 900000]) {
+  for (const km of [30000, 90000, 150000, 250000]) {
+    const r = ff.buildFossefall({ finnUtpris: finn, km, modelYear: 2018,
+      bilInfo: { year: 2018, egenvekt: 1500 }, satser });
+    if (r.pris_manuelt) continue;
+    const A = r.a.peasy_bud_mid, B = r.b.peasy_bud_mid, O = r.ordna.peasy_bud_mid;
+    const tag = finn + '/' + km;
+    assert.ok(B <= A, 'B over A for ' + tag + ': A=' + A + ' B=' + B);
+    assert.ok(O <= B, 'Ordna over B for ' + tag + ': B=' + B + ' O=' + O);
+    // Motoren skalerer den URUNDEDE midten, sa B kan avvike inntil 1000 fra
+    // rund(A*0.9). Sjekk forholdet, ikke eksakt likhet.
+    assert.ok(Math.abs(B - A * 0.9) <= 1000, 'B/A ikke 0.9 for ' + tag + ': A=' + A + ' B=' + B);
+    assert.ok(Math.abs(O - A * 0.75) <= 1000, 'Ordna/A ikke 0.75 for ' + tag + ': A=' + A + ' O=' + O);
+    for (const arm of ['a', 'b', 'ordna']) {
+      assert.ok(r[arm].lav >= 3000, 'lav under vrakpantgulv for ' + tag + ' ' + arm);
+      assert.strictEqual(r[arm].avsetning_takst, r.a.avsetning_takst, 'takst avviker for ' + tag + ' ' + arm);
+      assert.strictEqual(r[arm].klargjoring, -1000, 'klargjoring != 1000 for ' + tag + ' ' + arm);
+      assert.deepStrictEqual(r[arm].spenn, r.a.spenn, 'spenn avviker for ' + tag + ' ' + arm);
+    }
+  }
+}
+delete process.env.FOSSEFALL_TABLES_LIVE;
+
+// --- v20.153: staatid ligger OVER Peasy-avgiften ---
+// Avgiften er en trapp slatt opp pa AR-bud. La staatid under, kunne en bil
+// med staatidskostnad havne i for hoyt avgiftstrinn.
+{
+  const base = Object.assign(ctx(), { profile: 'a' });
+  const uten = ff.computeSharedFossefall(Object.assign({}, base, { statidKr: 0 }));
+  const med  = ff.computeSharedFossefall(Object.assign({}, base, { statidKr: -12000 }));
+
+  // Staatid er inne i AR-bud, ikke lagt pa etterpa.
+  assert.strictEqual(med.ar_bud, uten.ar_bud - 12000, 'staatid ikke i AR-bud');
+  assert.strictEqual(med.statid, -12000);
+  assert.strictEqual(uten.statid, 0);
+
+  // Avgiften kan bare falle eller sta stille nar AR-bud faller.
+  const avgUten = -uten.peasy_avgift.lav, avgMed = -med.peasy_avgift.lav;
+  assert.ok(avgMed <= avgUten, 'avgift steg av staatidskostnad: ' + avgUten + ' -> ' + avgMed);
+
+  // Midten faller med minst staatiden (mer hvis avgiften ogsa falt et trinn).
+  assert.ok(med.peasy_bud_mid <= uten.peasy_bud_mid - 11000,
+    'midt falt ikke med staatiden: ' + uten.peasy_bud_mid + ' -> ' + med.peasy_bud_mid);
+
+  // Null staatid skal ikke endre noe i det hele tatt.
+  const null0 = ff.computeSharedFossefall(Object.assign({}, base, { statidKr: 0 }));
+  assert.strictEqual(null0.ar_bud, uten.ar_bud);
+  assert.strictEqual(null0.peasy_bud_mid, uten.peasy_bud_mid);
+  assert.deepStrictEqual(null0.peasy_avgift, uten.peasy_avgift);
+}
+
+// Avgiftstrinn skal faktisk kunne falle: finn en bil rett over en trinngrense.
+{
+  let kryssetTrinn = false;
+  for (const finn of [60000, 80000, 110000, 140000, 175000, 210000, 260000]) {
+    for (const km of [30000, 90000, 150000]) {
+      const b = { finnUtpris: finn, km, modelYear: 2018,
+        bilInfo: { year: 2018, egenvekt: 1500 }, satser, profile: 'a' };
+      const u = ff.computeSharedFossefall(Object.assign({}, b, { statidKr: 0 }));
+      const m = ff.computeSharedFossefall(Object.assign({}, b, { statidKr: -20000 }));
+      if (u.skip || m.skip) continue;
+      if (-m.peasy_avgift.lav < -u.peasy_avgift.lav) kryssetTrinn = true;
+    }
+  }
+  assert.ok(kryssetTrinn, 'fant ingen bil der staatid senket avgiftstrinnet - er trappen koblet til AR-bud?');
+}
+
+console.log('fossefall.test.js ok');
   console.log('  celle', a.celleId, 'midt', a.peasy_bud_mid, 'lav/hoy', a.lav, a.hoy);
 })().catch((err) => {
   console.error(err);
