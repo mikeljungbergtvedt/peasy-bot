@@ -688,19 +688,64 @@ export async function fetchAvvistRows(start, end, kmByReg = {}) {
     console.log('Avvist-tabell: EASY_WEBHOOK_TOKEN mangler');
     return [];
   }
-  const r = await fetch('http://127.0.0.1:7780/list/rejected', {
-    headers: { Authorization: 'Bearer ' + token }
-  });
-  if (!r.ok) {
-    console.log('Avvist-tabell: liste 16 HTTP', r.status);
-    return [];
-  }
-  const j = await r.json();
+  // Liste 16 er paginert STIGENDE: side 1 er de eldste avvisningene.
+  // Uten ?page ga proxyen side 1 (april-juli 2025), og filteret fant aldri noe.
+  // Vi gaar derfor bakover fra siste side til en hel side ligger foer periodestart.
+  const MAKS_SIDER = 10;
+  const hent = async (side) => {
+    const r = await fetch('http://127.0.0.1:7780/list/rejected?per_page=100&page=' + side, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!r.ok) {
+      console.log('Avvist-tabell: liste 16 HTTP', r.status, 'side', side);
+      return null;
+    }
+    return r.json();
+  };
   const startIso = fmtIsoDate(start);
   const endIso = fmtIsoDate(end);
+
+  const forste = await hent(1);
+  if (!forste) return [];
+  const sisteSide = Number(forste.last_page) || 1;
+
+  const sett = new Set();
+  const biler = [];
+  let komplett = false;
+  let sider = 0;
+  for (let side = sisteSide; side >= 1 && sider < MAKS_SIDER; side--) {
+    const j = side === 1 ? forste : await hent(side);
+    if (!j) break;
+    sider++;
+    // Avvisninger kan ha kommet inn mellom de to kallene.
+    if (side === sisteSide && Number(j.last_page) > sisteSide) {
+      console.log('Avvist-tabell: ADVARSEL - last_page vokste fra', sisteSide, 'til',
+        j.last_page, '- de nyeste avvisningene kan mangle');
+    }
+    const chunk = j.biler || [];
+    for (const b of chunk) {
+      const k = String(b.id ?? b.registration_number ?? '');
+      if (k && sett.has(k)) continue;
+      if (k) sett.add(k);
+      biler.push(b);
+    }
+    const nyeste = chunk
+      .map(b => osloDay((b.process_milestones || {}).rejected_at))
+      .filter(Boolean).sort().at(-1);
+    if (nyeste && nyeste < startIso) { komplett = true; break; }
+    // Naadd starten av lista: da har vi sett alt som finnes, ikke bare nok.
+    if (side === 1) komplett = true;
+  }
+  if (!komplett) {
+    console.log('Avvist-tabell: ADVARSEL - stoppet paa sidegrensen (' + MAKS_SIDER +
+      ' sider), kan mangle rader foer ' + startIso);
+  }
+  console.log('Avvist-tabell: hentet', biler.length, 'rader fra', sider,
+    'sider, last_page', sisteSide, komplett ? '(komplett)' : '(ufullstendig)');
+
   const meas = await loadMeasurements();
   const overrides = await loadOverrides();
-  return (j.biler || []).filter(b => {
+  return biler.filter(b => {
     const st = (b.status_entity && b.status_entity.status) || '';
     if (st !== 'REJECTED_BY_CUSTOMER') return false;
     const day = osloDay((b.process_milestones || {}).rejected_at);
