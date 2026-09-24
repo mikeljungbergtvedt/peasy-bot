@@ -5,7 +5,7 @@
 const assert = require('assert');
 const ff = require('./fossefall');
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.153');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.157');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -413,6 +413,54 @@ delete process.env.FOSSEFALL_TABLES_LIVE;
   assert.ok(kryssetTrinn, 'fant ingen bil der staatid senket avgiftstrinnet - er trappen koblet til AR-bud?');
 }
 
+
+// v20.157: AR-salær — forhandleren betaler bud + salær (2,7 % av budet, minst 2 200 kr).
+{
+  // Regnet for hånd: verdi 180000−38000−13000−4532−1000 = 123468; bud = min(123468/1.027, 123468−2200) = 120222; salær 3246.
+  assert.strictEqual(ff.arSalaerKr(123468, 2.7, 2200), 3246);
+  // Minimum slår inn under ~81 500 i bud: verdi 22468 → bud 20268, salær 2200.
+  assert.strictEqual(ff.arSalaerKr(22468, 2.7, 2200), 2200);
+  assert.strictEqual(ff.arSalaerKr(123468, 0, 0), 0);
+  assert.strictEqual(ff.arSalaerKr(-5000, 2.7, 2200), 0);
+  const salSat = JSON.parse(JSON.stringify(satser));
+  salSat.arSalaerPct = 2.7;
+  salSat.arSalaerMin = 2200;
+  const s = ff.computeSharedFossefall(Object.assign(ctx(), { satser: salSat, profile: 'a' }));
+  assert.strictEqual(s.skip, false);
+  assert.strictEqual(s.forhandler_verdi, 123468);
+  assert.strictEqual(s.salaer_ar, -3246);
+  assert.strictEqual(s.ar_bud, 120222);
+  assert.strictEqual(s.peasy_avgift.lav, -9900);
+  assert.strictEqual(s.peasy_bud_mid, 110000);
+  assert.strictEqual(s.lav, 90000);
+  assert.strictEqual(s.hoy, 123000);
+  assert.strictEqual(s.salaer_ar_pct, 2.7);
+  assert.strictEqual(s.salaer_ar_min, 2200);
+  assert.strictEqual(ff.verifyLag(s).ok, true, JSON.stringify(ff.verifyLag(s)));
+  // Billig bil: minimum-regime.
+  const c = ff.computeSharedFossefall(Object.assign(ctx({ finnUtpris: 45000, km: 80000 }), { satser: salSat, profile: 'a' }));
+  assert.strictEqual(c.forhandler_verdi, 22468);
+  assert.strictEqual(c.salaer_ar, -2200);
+  assert.strictEqual(c.ar_bud, 20268);
+  assert.strictEqual(ff.verifyLag(c).ok, true, JSON.stringify(ff.verifyLag(c)));
+  // Hele fossefallet: B og Ordna skaleres fortsatt fra A-midt med salæret inne.
+  process.env.FOSSEFALL_TABLES_LIVE = '1';
+  delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
+  const sb = ff.buildFossefall(Object.assign(ctx(), { satser: salSat }));
+  assert.strictEqual(sb.pris_manuelt, false, sb.grunn);
+  assert.strictEqual(sb.a.peasy_bud_mid, 110000);
+  assert.strictEqual(sb.b.peasy_bud_mid, ff._internal.roundKr(110000 * 0.9));
+  assert.strictEqual(sb.ordna.peasy_bud_mid, ff._internal.roundKr(110000 * 0.75));
+  // Ugyldig sats i Pulse (f.eks. 27 i stedet for 2,7) gir PRIS MANUELT, ikke et stille feil tall.
+  const bad = JSON.parse(JSON.stringify(salSat)); bad.arSalaerPct = 27;
+  const sBad = ff.computeSharedFossefall(Object.assign(ctx(), { satser: bad, profile: 'a' }));
+  assert.strictEqual(sBad.skip, true);
+  assert.ok(/ugyldig AR-salær/.test(sBad.grunn), sBad.grunn);
+  // Uten salær i satsene: som før (ingen trekk).
+  const none = ff.computeSharedFossefall(Object.assign(ctx(), { satser, profile: 'a' }));
+  assert.ok(none.salaer_ar === 0 || Object.is(none.salaer_ar, -0));
+  assert.strictEqual(none.ar_bud, 143468 - 20000);
+}
 console.log('fossefall.test.js ok');
   console.log('  celle', a.celleId, 'midt', a.peasy_bud_mid, 'lav/hoy', a.lav, a.hoy);
 })().catch((err) => {

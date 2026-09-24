@@ -154,6 +154,8 @@ function formatFossefallBlock(card) {
   lines.push(armLine('Ordna', card.ordna));
   const klarg = card.a && card.a.klargjoring;
   if (klarg != null && !card.pris_manuelt) lines.push('Klargjøring: ' + kr(klarg));
+  const salaer = card.a && card.a.salaer_ar;
+  if (salaer != null && Number(salaer) !== 0 && !card.pris_manuelt) lines.push('AR-salær: ' + kr(salaer));
   return lines.join('\n');
 }
 

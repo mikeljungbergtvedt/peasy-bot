@@ -1,9 +1,12 @@
 'use strict';
 /**
- * fossefall.js — v20.153
+ * fossefall.js — v20.157
  * Delbeløp i kroner. Ingen X-faktor.
  * usikkerhet_takst (alias spenn). returtrekk fjernet (var alias/dobbeltbokføring).
  *
+ * v20.157: AR-salær. Forhandleren betaler bud + salær (satser.arSalaerPct % av budet, minst satser.arSalaerMin kr).
+ *          AR-bud = min(verdi ÷ (1 + pct), verdi − min), der verdi = Finn − margin − takst ± ståtid − omreg − klargjøring.
+ *          Egen linje salaer_ar, med i sumLag. Mangler satsene: 0 (som før). Ugyldige satser: PRIS MANUELT.
  * v20.150: locked scale B=A×0.9 Ordna=A×0.75; absurd midt/Finn → PRIS MANUELT.
  * v20.149: locked scale (Ordna was wrongly ×0.25).
  * v20.146: ståtid inngår i den ene peasy-bud-midten (ikke bare som skift på lav/høy).
@@ -11,7 +14,7 @@
  * Deretter vrakpant-gulv på midt, lav og høy. AR-bud ≤ 0 er ikke PRIS MANUELT.
  * celleId = prisbånd|kmbånd (Pulse-aksene).
  * v20.144: ett tall, så ett spenn, så profil som merkelapp.
- * Finn → margin → takst → ståtid → omreg → klargjøring 1000 → AR-bud → peasyFee → én peasyBud (midt).
+ * Finn → margin → takst → ståtid → omreg → klargjøring 1000 → AR-salær → AR-bud → peasyFee → én peasyBud (midt).
  * Spenn-tabellens ned|opp legges rundt den samme midten → lav/høy.
  * Locked: ett fossefall → midt A; B = A×0.9; Ordna = A×0.75; Spenn-tabell lav/høy per midt.
  * STATID_A_LIVE (default på): ståtid inngår i peasy-bud-midt og kopieres til alle armer. Den klemmes ikke av margin-maks.
@@ -20,7 +23,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.153';
+const FOSSEFALL_VERSION = 'v20.157';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -34,6 +37,28 @@ const PROFILES = {
 
 /** Ny sti. Gammel Easy-sti (computeA) beholder EASY_COST.klargjoring = 5000. */
 const KLARGJORING_KR = 1000;
+
+/** v20.157: AR-salær fra satsene. Mangler begge → 0 (som før v20.157). Ugyldig → ok:false. */
+function arSalaerFra(satser) {
+  const s = satser || {};
+  const harPct = s.arSalaerPct != null && s.arSalaerPct !== '';
+  const harMin = s.arSalaerMin != null && s.arSalaerMin !== '';
+  const pct = harPct ? Number(s.arSalaerPct) : 0;
+  const min = harMin ? Number(s.arSalaerMin) : 0;
+  if (!Number.isFinite(pct) || pct < 0 || pct > 20) return { ok: false, grunn: 'ugyldig AR-salær % i satser' };
+  if (!Number.isFinite(min) || min < 0 || min > 50000) return { ok: false, grunn: 'ugyldig AR-salær minimum i satser' };
+  return { ok: true, pct, min };
+}
+
+/** Salæret forhandleren betaler når budet er det som gjør bud + salær = verdi. */
+function arSalaerKr(verdi, pct, min) {
+  const v = Number(verdi);
+  const p = Number(pct) || 0;
+  const m = Number(min) || 0;
+  if (!Number.isFinite(v) || v <= 0 || (p <= 0 && m <= 0)) return 0;
+  const bud = Math.max(0, Math.round(Math.min(v / (1 + p / 100), v - m)));
+  return v - bud;
+}
 
 const CONFIG_URL = process.env.PEASY_CONFIG_URL
   || 'https://mikeljungbergtvedt.github.io/peasy-config.json';
@@ -378,6 +403,7 @@ function sumLag(lag, side) {
     Number(lag.omregistrering || 0) +
     Number(lag.transport || 0) +
     Number(lag.klargjoring || 0) +
+    Number(lag.salaer_ar || 0) +
     sideOf(lag.usikkerhet_takst != null ? lag.usikkerhet_takst : lag.spenn, side) +
     sideOf(lag.forhandlermargin_tillegg_bud, side) +
     sideOf(lag.ordna_trekk, side) +
@@ -708,6 +734,8 @@ function lookupFossefallCell(satser, finn, km) {
   let margin = marginRaw;
   if (marginMin != null && margin < marginMin) margin = marginMin;
   if (marginMax != null && margin > marginMax) margin = marginMax;
+  const sal = arSalaerFra(satser);
+  if (!sal.ok) return { ok: false, grunn: sal.grunn, priceId: priceBand.id, kmId: kmBand.id };
 
   return {
     ok: true,
@@ -720,6 +748,8 @@ function lookupFossefallCell(satser, finn, km) {
     marginMax,
     takst,
     spenn,
+    salaerPct: sal.pct,
+    salaerMin: sal.min,
   };
 }
 
@@ -779,7 +809,12 @@ function computeSharedFossefall(opts) {
   //   Finn → margin → takst → ståtid → omreg → klargjøring → avgift → A-midt
   // Avgiften er en trapp slått opp på AR-bud, så ståtid må ligge over den.
   // Lå den under, kunne en bil med ståtidskostnad havne i for høyt avgiftstrinn.
-  const arBud = finn - margin - takst + statidKr - omregKr - KLARGJORING_KR;
+  // v20.157: forhandlerens verdi før AR-salær; budet er verdien minus salæret de betaler på toppen.
+  const verdiForSalaer = finn - margin - takst + statidKr - omregKr - KLARGJORING_KR;
+  const salaerPct = Number(looked.salaerPct) || 0;
+  const salaerMin = Number(looked.salaerMin) || 0;
+  const salaerKr = arSalaerKr(verdiForSalaer, salaerPct, salaerMin);
+  const arBud = verdiForSalaer - salaerKr;
   const fee = peasyFee(arBud);
   // Rund midt først, så lav/høy fra den midten ± spenn.
   const midRaw = arBud - fee;
@@ -822,6 +857,10 @@ function computeSharedFossefall(opts) {
     omregistrering_note: om.note,
     transport: 0,
     klargjoring: -KLARGJORING_KR,
+    salaer_ar: -salaerKr,
+    salaer_ar_pct: salaerPct,
+    salaer_ar_min: salaerMin,
+    forhandler_verdi: verdiForSalaer,
     usikkerhet_takst: { lav: -ned, hoy: opp },
     spenn: { lav: -ned, hoy: opp },
     forhandlermargin_tillegg_bud: emptySide(),
@@ -848,6 +887,8 @@ function computeSharedFossefall(opts) {
       omregKr,
       klargjoring: KLARGJORING_KR,
       statidKr,
+      verdiForSalaer,
+      salaerKr,
       vrakpant: false,
     },
   };
@@ -1186,6 +1227,7 @@ module.exports = {
   ARM_SCALE,
   PROFILES,
   KLARGJORING_KR,
+  arSalaerKr,
   CONFIG_URL,
   buildFossefall,
   buildSharedFossefall,
