@@ -1,11 +1,11 @@
 'use strict';
 /**
- * qa-anker-plan.js — v20.155
+ * qa-anker-plan.js — v20.156
  * QA → «Sett Finn-pris»: manuell Finn-utpris går gjennom samme fossefall som boten
  * (fossefall.js + satstabellene), med årsmodell og egenvekt så omregistrering blir riktig.
  * Skrivende scenario velges med fossefall-card abArm — samme regel som planErpWrite og Pulse
- * (Ordna og AutoDB → Ordna, ellers internnr partall A / oddetall B).
- * v20.155: byttet fra ab-arm liveOwner, som gir AutoDB A/B og dermed avvek fra fossefall og Pulse.
+ * (Ordna → Ordna, alle andre inkl. AutoDB: internnr partall A / oddetall B).
+ * v20.156: AutoDB er ikke Ordna (fossefall-card abArm rettet).
  * PRIS MANUELT fra fossefallet → ok:false med grunn. Ingen gammel kalkyle som reserve.
  */
 const { buildFossefall, loadFossefallSatser } = require('./fossefall');

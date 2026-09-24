@@ -12,7 +12,7 @@ const fossefall = require('./fossefall');
 
 function abArm(erpId, source) {
   const k = String(source || '').toLowerCase();
-  if (k === 'ordna' || k === 'autodb') return 'O';
+  if (k === 'ordna') return 'O'; // AutoDB er ikke Ordna — går A/B etter internnr
   const n = Number(erpId);
   if (!Number.isFinite(n) || n <= 0) return 'A';
   return n % 2 === 0 ? 'A' : 'B';
