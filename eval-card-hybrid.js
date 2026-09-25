@@ -328,10 +328,12 @@ function formatEvalCardHybrid(p, forErp = false) {
       ['Finn-utpris', arm.finn_utpris, false],
       ['Origin-cap', arm.origin_cap, true],
       ['Forhandlermargin', marginTot, true],
+      ['Avsetning takst', arm.avsetning_takst, true], // v20.165: manglet — summen gikk ikke opp
       ['Ståtid', arm.statid, true],
       ['Omregistrering', arm.omregistrering, true],
       ['Transport', arm.transport, true],
       ['Klargjøring', arm.klargjoring, true],
+      ['AR-salær', arm.salaer_ar, true], // v20.165: manglet
       ['Usikkerhet takst', utakst, true],
       ['Ordna-trekk', arm.ordna_trekk, true],
       ['Vrakpant-gulv', arm.vrakpant_gulv, true],
@@ -380,6 +382,11 @@ function formatEvalCardHybrid(p, forErp = false) {
     }
     if (ff && ff.statid_manuell && writeArm === 'A' && !layerZero(arm.statid)) {
       lines.push('Ståtid over 60 d, vurder manuelt');
+    }
+    // v20.165: B/Ordna er A-midt × skala. Vis steget, ellers går ikke summen opp.
+    const skala = Number(arm.arm_scale);
+    if (Number.isFinite(skala) && skala !== 1 && ff && ff.a && ff.a.peasy_bud_mid != null) {
+      lines.push(((`${armLabel} = A × ${String(skala).replace('.', ',')}:`).padEnd(17) + ' ') + ffKr(ff.a.peasy_bud_mid, false) + ' → ' + ffKr(arm.peasy_bud_mid, false));
     }
     const lav = Number(arm.lav), hoy = Number(arm.hoy);
     const lh = (!Number.isFinite(lav) && !Number.isFinite(hoy))
