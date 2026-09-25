@@ -255,6 +255,35 @@ if (req.method === 'GET' && reqPath === '/ai-usage') {
       return;
     }
 
+    // qa-meas: bare målingene for bilene på liste 3 (Pulse QA). Samme JSONL som /measurements, filtrert.
+    if (req.method === 'GET' && reqPath === '/qa/meas') {
+      const auth = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+      if (!TOKEN || auth !== TOKEN) {
+        log('[webhook] 401 qa/meas');
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, err: 'unauthorized' }));
+        return;
+      }
+      try {
+        const params = new URL(req.url, 'http://mini').searchParams;
+        const svar = require('./qa-meas.js').qaMeasSvar(params);
+        const hdr = { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' };
+        if (svar.status === 200 && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))) {
+          hdr['Content-Encoding'] = 'gzip';
+          res.writeHead(200, hdr);
+          res.end(require('zlib').gzipSync(svar.body));
+        } else {
+          res.writeHead(svar.status, hdr);
+          res.end(svar.body);
+        }
+      } catch (e) {
+        log('[webhook] qa/meas EXC ' + (e && e.message || e));
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, err: String(e && e.message || e) }));
+      }
+      return;
+    }
+
     if (req.method === 'GET' && (reqPath === '/measurements' || reqPath === '/v3g-measurements' || reqPath === '/bot4-measurements' || reqPath === '/loop2-measurements')) {
       try {
         const fs = require('fs');
