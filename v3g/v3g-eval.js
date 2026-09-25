@@ -95,13 +95,9 @@ async function attachFossefall(record) {
       || (record.easy && (record.easy.finn_utpris != null ? record.easy.finn_utpris : record.easy.anker))
     );
     if (!Number.isFinite(finnFf) || finnFf <= 0) return record;
-    // v20.167: avvik bare på armen som eier bilen. A: Easy sitt skrevne tall.
-    // B/Ordna: det som skrives er fossefall-armens lav–høy (se «Locked» under), så avviket er 0.
-    // Før ble V3G sin gamle kalkyle lagret som B og ga falske avvik.
-    const eier = liveOwner(record.erpId, record.source);
     const lagret = {};
     const hints = {};
-    if (eier === 'A' && record.easy && Number.isFinite(Number(record.easy.dLav))) {
+    if (record.easy && Number.isFinite(Number(record.easy.dLav))) {
       lagret.a = { dLav: record.easy.dLav, dHoy: record.easy.dHoy };
       hints.a = {
         anker_lagret: record.easy.finn_utpris != null ? record.easy.finn_utpris : record.easy.anker,
@@ -111,6 +107,18 @@ async function attachFossefall(record) {
         wrecker: !!record.easy.wrecker || !!record.wrecker,
         aar_mangler: !(record.modelYear),
       };
+    }
+    if (record.v3g && Number.isFinite(Number(record.v3g.dLav))) {
+      const band = { dLav: record.v3g.dLav, dHoy: record.v3g.dHoy };
+      const h = {
+        anker_lagret: record.v3g.finn_utpris != null ? record.v3g.finn_utpris : record.v3g.anker,
+        km_override: !!record.km_override,
+        origin_cap: !!record.v3g.origin_cap,
+        wrecker: !!record.wrecker,
+        aar_mangler: !(record.modelYear),
+      };
+      if (record.v3g.kalkyle === 'ordna') { lagret.ordna = band; hints.ordna = h; }
+      else { lagret.b = band; hints.b = h; }
     }
     let soldDays = [];
     try {
