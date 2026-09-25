@@ -255,6 +255,37 @@ if (req.method === 'GET' && reqPath === '/ai-usage') {
       return;
     }
 
+    // drive-anne-logg: hva månedsmailen til Anne (Drive) har sendt og når. Leser drive-gire-state.json (skrives av monthly-drive-gire-report.js).
+    if (req.method === 'GET' && reqPath === '/drive/anne-logg') {
+      const auth = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
+      if (!TOKEN || auth !== TOKEN) {
+        log('[webhook] 401 drive/anne-logg');
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, err: 'unauthorized' }));
+        return;
+      }
+      try {
+        const fil = path.join(__dirname, 'drive-gire-state.json');
+        const st = require('fs').existsSync(fil) ? JSON.parse(require('fs').readFileSync(fil, 'utf8')) : {};
+        const mnd = {};
+        const keys = new Set([...Object.keys(st.test_sent || {}), ...Object.keys(st.anne_sent || {}), ...Object.keys(st.logg || {})]);
+        for (const k of keys) {
+          const l = (st.logg || {})[k] || {};
+          mnd[k] = {
+            test: l.test || ((st.test_sent || {})[k] ? { dato: st.test_sent[k] } : null),
+            anne: l.anne || ((st.anne_sent || {})[k] ? { dato: st.anne_sent[k] } : null),
+          };
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify({ ok: true, mnd }));
+      } catch (e) {
+        log('[webhook] drive/anne-logg EXC ' + (e && e.message || e));
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, err: String(e && e.message || e) }));
+      }
+      return;
+    }
+
     // qa-meas: bare målingene for bilene på liste 3 (Pulse QA). Samme JSONL som /measurements, filtrert.
     if (req.method === 'GET' && reqPath === '/qa/meas') {
       const auth = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '').trim();
