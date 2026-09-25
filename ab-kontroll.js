@@ -1,7 +1,6 @@
 'use strict';
 // ab-kontroll.js — daglig kontroll av at ERP har riktig lav for bilens scenario.
 // Scenario: Ordna hvis kilde er ordna, ellers internnr partall = A, oddetall = B (ab-arm.js).
-// Ordna sjekkes ikke: Ordna endrer lav–høy til sin kunde selv etter at vi har gitt vårt tall.
 // Fasit: fossefallets lav for scenarioet i siste gyldige måling (tabellene live, ikke PRIS MANUELT).
 // Sjekkes mot lav i ERP (kolonne D «lav-høy»). Avvik over 100 kr → e-post til Mike (sendMail).
 // Måling pares på internnr (erpId). Uten erpId: bare nyeste internnr for regnr (samme bil kan komme inn flere ganger).
@@ -68,7 +67,7 @@ function kontrollerAB({ rows, maalinger, fra, toleranse = TOLERANSE } = {}) {
   }
   const avvik = [];
   const ikkeSkrevet = [];
-  const per = { A: 0, B: 0 };
+  const per = { A: 0, B: 0, ORDNA: 0 };
   let sjekket = 0;
   for (const r of rows || []) {
     if (!Array.isArray(r)) continue;
@@ -81,7 +80,6 @@ function kontrollerAB({ rows, maalinger, fra, toleranse = TOLERANSE } = {}) {
     }
     if (!m || (fra && m.t < fra)) continue;
     const scen = liveOwner(r[K.internnr], r[K.kilde]);
-    if (scen === 'ORDNA') continue;
     const arm = m.ff[NOKKEL[scen]];
     const fasit = positiv(arm && arm.lav);
     if (!fasit) continue;
@@ -99,7 +97,7 @@ function kontrollerAB({ rows, maalinger, fra, toleranse = TOLERANSE } = {}) {
 
 function tekst(res, timer) {
   const p = res.per_scenario;
-  const hode = `Scenario-kontroll siste ${timer} t: ${res.sjekket} biler (A ${p.A}, B ${p.B}; Ordna sjekkes ikke), ${res.avvik.length} med annen lav i ERP enn fossefallet`;
+  const hode = `Scenario-kontroll siste ${timer} t: ${res.sjekket} biler (A ${p.A}, B ${p.B}, Ordna ${p.ORDNA}), ${res.avvik.length} med annen lav i ERP enn fossefallet`;
   if (!res.avvik.length) return hode + '.';
   const linjer = res.avvik.slice(0, 15).map((x) =>
     `${x.regnr} (${x.internnr || '?'}) ${x.scenario}: ERP ${kr(x.erp)}, fossefallet ${kr(x.fossefall)} (${x.diff > 0 ? '+' : ''}${kr(x.diff)})`);
