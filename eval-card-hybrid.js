@@ -16,6 +16,10 @@
 
 'use strict';
 
+const { formatFossefallBlock } = require('./fossefall-card');
+
+const { scopeHeadline } = require('./biltype-gate');
+
 function nf(n) {
   const v = Number(n);
   return Number.isFinite(v) ? Math.round(v).toLocaleString('nb-NO') : '?';
@@ -43,37 +47,6 @@ function rpad(n) {
   return nf(n).padStart(10);
 }
 
-// Fossefallet slik det skrives til ERP: A-kjeden, deretter scenarioet som eier bilen.
-// Returnerer null hvis kortet ikke har et live fossefall (da vises gammel KALKYLE).
-function fossefallLines(ff, writeArm) {
-  if (!ff || !ff.a || !ff.tables_live) return null;
-  if (ff.pris_manuelt) return ['PRIS MANUELT' + (ff.grunn ? ' — ' + ff.grunn : '')];
-  const a = ff.a;
-  const minus = (v) => rpad(Math.abs(Number(v) || 0));
-  const arm = writeArm === 'O' ? 'ordna' : (writeArm === 'B' ? 'b' : 'a');
-  const navn = arm === 'ordna' ? 'Ordna' : arm.toUpperCase();
-  const s = ff[arm] || a;
-  const fee = a.peasy_avgift && a.peasy_avgift.lav != null ? a.peasy_avgift.lav : null;
-  const st = Number(a.statid) || 0;
-  const l = [
-    `Finn-utpris:  ${rpad(a.finn_utpris)} kr`,
-    `- Margin:     ${minus(a.forhandlermargin)} kr`,
-    `- Takst:      ${minus(a.avsetning_takst)} kr`,
-    ...(st ? [`${st < 0 ? '-' : '+'} Ståtid:     ${minus(st)} kr`] : []),
-    `- Omreg:      ${minus(a.omregistrering)} kr`,
-    `- Klargjøring:${minus(a.klargjoring)} kr`,
-    ...(a.salaer_ar ? [`- AR-salær:   ${minus(a.salaer_ar)} kr`] : []),
-    `= AR-bud:     ${rpad(a.ar_bud)} kr`,
-    ...(fee != null ? [`- Avgift:     ${minus(fee)} kr`] : []),
-    `= Peasy-bud A:${rpad(a.peasy_bud_mid)} kr` + ((fee != null && Number(a.ar_bud) - Math.abs(fee) < Number(a.peasy_bud_mid) - 500) ? '  (vrakpant-gulv)' : ''),
-  ];
-  if (arm === 'b') l.push(`B = A × 0,9:  ${rpad(s.peasy_bud_mid)} kr`);
-  if (arm === 'ordna') l.push(`Ordna = A × 0,75:${rpad(s.peasy_bud_mid)} kr`);
-  l.push(`Lav – høy ${navn}: ${nf(s.lav)} – ${nf(s.hoy)} kr`);
-  l.push(`Celle: ${ff.celleId || '?'}`);
-  return l;
-}
-
 function formatEvalCardHybrid(p, forErp = false) {
   const bil = p.bil || {};
   const veg = p.vegData || {};
@@ -91,15 +64,26 @@ function formatEvalCardHybrid(p, forErp = false) {
   const out = [];
 
   // ── 1. Tittel ────────────────────────────────────────────────
-  const source = (bil.source || '').toLowerCase() === 'driveno' ? 'DRIVE' : 'PEASY';
+  const srcRaw = String(bil.source || '').toLowerCase();
+  const source = srcRaw === 'driveno' ? 'DRIVE' : (srcRaw === 'ordna' ? 'ORDNA' : 'PEASY');
   const qaTag = p.qaOverride ? ' ⚡ QA OVERRIDE' : '';
   out.push(B(`${source} BIL TIL ESTIMERING${qaTag}`));
 
+  const scopeGate = p.utenforScope || p.biltypeGate;
+  if (scopeGate && scopeGate.utenfor_scope) {
+    out.push(B(scopeHeadline(scopeGate)));
+    if (scopeGate.fant) out.push(forErp ? `Fant: ${scopeGate.fant}` : I(`Fant: ${E(scopeGate.fant)}`));
+    out.push('');
+  }
+
   // ── 2. Bil-linje ─────────────────────────────────────────────
-  const isEl = (veg.fuel || '').toLowerCase().includes('elektr');
+  const prop = veg.propulsion || (veg.isHybrid ? 'HYBRID' : ((veg.fuel || '').toLowerCase().includes('elektr') && !/\+|hybrid/i.test(veg.fuel || '') ? 'EV' : 'FOSSIL'));
+  const isEl = prop === 'EV';
   const hkStr = isEl
     ? (veg.range ? `${veg.range} km rekkevidde` : `${veg.kw || '?'} kW`)
-    : (veg.hk ? `${veg.hk} hk` : (veg.kw ? `${veg.kw} kW` : ''));
+    : (prop === 'HYBRID'
+      ? (veg.drive ? `${veg.drive} hybrid` : 'hybrid')
+      : (veg.hk ? `${veg.hk} hk` : (veg.kw ? `${veg.kw} kW` : '')));
   const kmYear = seg.kmPerYear ? `${nf(seg.kmPerYear)} km/år` : '';
   const karosseri = (veg.avgiftsgruppe || '').includes('Personbil')
     ? 'Personbil'
@@ -116,9 +100,7 @@ function formatEvalCardHybrid(p, forErp = false) {
   ].filter(Boolean).join(' | ');
   out.push(forErp ? carLine : I(carLine));
   // v20.70: km-override-linje (vises kun når oppgitt km ble overstyrt av EU-kontroll)
-  if (p.kmOverride) {
-    out.push(`🔄 Km endret: ${nf(p.kmOverride.from || 0)} → ${nf(p.kmOverride.to || 0)} (EU-kontroll)`);
-  }
+  // v20.96: Km endret-linjen fjernet — bot korrigerer ikke km lenger
   out.push('');
 
   // ── 3. Bilmodell-blokk ───────────────────────────────────────
@@ -238,76 +220,182 @@ function formatEvalCardHybrid(p, forErp = false) {
   const kmDiff = avgKm - originKm;
   const variant = (p.anchor && p.anchor.identifikasjon && p.anchor.identifikasjon.variant) || '';
   const ankerTab = [
-    `Anker:    ${rpad(ab.anker)} kr   (${comps.length} salg${breakdown ? ': ' + breakdown : ''})`,
+    `Finn-utpris: ${rpad(p.cappedFrom ? p.anchorUsed : ab.anker)} kr   (${comps.length} comps${breakdown ? ': ' + breakdown : ''})${p.cappedFrom ? '  ← capet fra ' + nf(p.cappedFrom) + ' kr' : ''}`,
     avgKm ? `Snitt km: ${rpad(avgKm)}      (${kmDiff >= 0 ? '+' : '-'}${nf(Math.abs(kmDiff))} vs origin)` : null,
     avgKm ? `Spenn:    ${(Math.round(minKm / 1000) + 'k-' + Math.round(maxKm / 1000) + 'k km').padStart(13)}` : null,
   ].filter(Boolean).join('\n');
-  out.push(B('ANKER'));
+  out.push(B('FINN-UTPRIS'));
   out.push(forErp ? ankerTab : `<pre>${esc(ankerTab)}</pre>`);
   if (variant) out.push(`Variant: ${E(variant)}`);
   if (p.cappedFrom) out.push(`⚠️ Anker capet til aktiv Finn-annonse: ${nf(p.anchorUsed)} kr (fra ${nf(p.cappedFrom)} kr)`);
   out.push('');
 
-  // ── 6b. FINN-ANNONSE (aktiv på finn.no) ──────────────────────
-  out.push(B('FINN-ANNONSE'));
+  // ── 6b. ORIGIN PÅ FINN ───────────────────────────────────────
   if (p.finnListing && p.finnListing.link) {
     const fl = p.finnListing;
-    const flBits = [];
-    if (fl.price) flBits.push(nf(fl.price) + ' kr');
-    if (fl.year) flBits.push(String(fl.year));
-    if (fl.km != null) flBits.push(nf(fl.km) + ' km');
-    const flLabel = flBits.length ? flBits.join(' | ') : 'apne annonse';
-    out.push(forErp
-      ? ('Origin aktiv pa Finn - ' + flLabel + ': ' + fl.link)
-      : ('<a href="' + esc(fl.link) + '">\u{1F517} Origin aktiv p\u00e5 Finn \u2014 ' + esc(flLabel) + '</a>'));
+    const via = fl.queriedBy === 'vin' ? 'funnet på VIN' : (fl.queriedBy === 'regnr' ? 'funnet på regnr' : 'funnet på Finn');
+    const pris = fl.price ? nf(fl.price) + ' kr' : '';
+    const line = 'ORIGIN PÅ FINN (' + via + ')' + (pris ? ' — ' + pris : '');
+    if (forErp) {
+      out.push(B(line));
+      out.push(fl.link);
+    } else {
+      out.push('<b style="color:#E65100">' + esc(line) + '</b>');
+      out.push('<a href="' + esc(fl.link) + '">' + esc(fl.link) + '</a>');
+    }
+    if (p.cappedFrom) out.push('⚠️ Anker capet mot annonsepris × 0,95');
   } else {
-    out.push(forErp ? 'Origin ikke aktiv pa Finn' : 'Origin ikke aktiv p\u00e5 Finn');
+    out.push(B('ORIGIN PÅ FINN'));
+    out.push(forErp ? 'Ikke funnet (søkt regnr + VIN)' : 'Ikke funnet (søkt regnr + VIN)');
   }
   const makeQ2 = String(veg.make || '').split(' ')[0];
   const modelQ2 = String(bil.model_series || veg.model || '').split('/')[0].split(/\s+/).slice(0, 2).join(' ').trim();
   const finnSokUrl = 'https://www.finn.no/mobility/search/car?registration_class=1&sort=PRICE_ASC&q=' + encodeURIComponent((makeQ2 + ' ' + modelQ2).trim()) + (bil.model_year ? '&year_from=' + bil.model_year + '&year_to=' + bil.model_year : '') + (originKm ? '&mileage_from=' + (Math.round(originKm * 0.85 / 1000) * 1000) + '&mileage_to=' + (Math.round(originKm * 1.25 / 1000) * 1000) : '');
   const carInfoUrl2 = 'https://www.car.info/no-no/valuation/N/' + String(bil.registration_number || '').replace(/\s/g, '');
   const finnFunnelUrl = p.finnUrl || finnSokUrl;
-  out.push(forErp ? ('Sok sosterbiler pa Finn (filtrert): ' + finnFunnelUrl) : ('<a href="' + esc(finnFunnelUrl) + '">\u{1F50D} S\u00f8k s\u00f8sterbiler p\u00e5 Finn (filtrert)</a>'));
+  out.push(forErp ? ('Sok sosterbiler pa Finn (AI builder): ' + finnFunnelUrl) : ('<a href="' + esc(finnFunnelUrl) + '">\u{1F50D} S\u00f8k s\u00f8sterbiler p\u00e5 Finn (AI builder)</a>'));
   out.push(forErp ? ('Car.info verdivurdering: ' + carInfoUrl2) : ('<a href="' + esc(carInfoUrl2) + '">Car.info verdivurdering</a>'));
   out.push('');
 
-  // ── 7. FOSSEFALL (det som skrives til ERP). Gammel KALKYLE bare når fossefallet mangler. ─
-  const ffLines = fossefallLines(p.fossefall, p.writeArm);
-  if (ffLines) {
-    const armNavn = p.writeArm === 'O' ? 'Ordna' : (p.writeArm === 'B' ? 'B' : 'A');
-    out.push(B('FOSSEFALL (scenario ' + armNavn + ')'));
-    const body = ffLines.join('\n');
-    out.push(forErp ? body : `<pre>${esc(body)}</pre>`);
-    if (val.dLav != null && val.dLav <= 0) out.push('🚩 QA: D lav ≤ 0 — ugyldig, ikke send');
-    out.push('');
+  // ── 6c. FOSSEFALL (primær) — midt, lav, høy, celle/tables path (PR#11)
+  const ffPrimary = p.fossefall || (p.valuation && p.valuation.fossefall) || null;
+  const ffBlockPrimary = formatFossefallBlock(ffPrimary);
+  out.push(forErp ? ffBlockPrimary : `<pre>${esc(ffBlockPrimary)}</pre>`);
+  out.push('');
+
+  // ── 7. KALKYLE (fossefall fra measurements — én arm)
+  const ff = p.fossefall || null;
+  const writeArmRaw = String(p.writeArm || p.skrivArm || 'A').toUpperCase();
+  const writeArm = writeArmRaw === 'O' || writeArmRaw === 'ORDNA' ? 'O' : (writeArmRaw === 'B' ? 'B' : 'A');
+  const armLabel = writeArm === 'O' ? 'Ordna' : writeArm;
+  const armKey = writeArm === 'O' ? 'ordna' : (writeArm === 'B' ? 'b' : 'a');
+  const arm = ff && typeof ff === 'object' ? ff[armKey] : null;
+
+  function ffKr(n, signed) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return '–';
+    const abs = Math.abs(Math.round(x)).toLocaleString('nb-NO');
+    if (x < 0) return '−' + abs;
+    if (signed && x > 0) return '+' + abs;
+    return abs;
+  }
+  function ffCell(v, signed) {
+    if (v == null) return '–';
+    if (typeof v === 'object' && (v.lav != null || v.hoy != null)) {
+      const lav = Number(v.lav), hoy = Number(v.hoy);
+      if (!Number.isFinite(lav) && !Number.isFinite(hoy)) return '–';
+      if (!Number.isFinite(hoy) || lav === hoy) return ffKr(Number.isFinite(lav) ? lav : hoy, signed);
+      if (!Number.isFinite(lav)) return ffKr(hoy, signed);
+      return ffKr(lav, signed) + ' / ' + ffKr(hoy, signed);
+    }
+    return ffKr(v, signed);
+  }
+  function ffAvvikLine(a) {
+    if (!a || !a.avvik_kr || typeof a.avvik_kr !== 'object') return '';
+    const av = a.avvik_kr;
+    const lav = Number(av.lav), hoy = Number(av.hoy);
+    const hasLav = Number.isFinite(lav) && lav !== 0;
+    const hasHoy = Number.isFinite(hoy) && hoy !== 0;
+    if (!hasLav && !hasHoy) return '';
+    let nums;
+    if (hasLav && hasHoy && lav !== hoy) nums = ffKr(lav, true) + ' / ' + ffKr(hoy, true);
+    else nums = ffKr(hasLav ? lav : hoy, true);
+    const aarsak = av.aarsak ? (' · ' + String(av.aarsak)) : '';
+    return `Avvik:          ${nums}${aarsak}`;
+  }
+
+  let kalkyleBody;
+  if (!arm) {
+    kalkyleBody = 'Fossefall mangler i measurements';
   } else {
-  const spreadStr = val.spreadPct != null ? `±${(val.spreadPct * 100).toFixed(1)}%` : '?';
-  const kalkyleBody = [
-    `Bracket: ${val.bracket || '?'}`,
-    `Segment: ${seg.segment || '?'} (${spreadStr})`,
-    `Anker:   ${rpad(p.anchorUsed != null ? p.anchorUsed : ab.anker)} kr`,
-    `- Margin:${rpad(val.margin)} kr`,
-    `= Brutto:${rpad(val.T)} kr`,
-    `- Fee:   ${rpad(val.fee)} kr`,
-    `= D mid: ${rpad(val.dMid)} kr`,
-    `D lav:   ${rpad(val.dLav)} kr`,
-    `D høy:   ${rpad(val.dHoy)} kr`,
-    ...(val.compCapApplied ? [`🛡️ Comp-cap: D høy klippet til laveste comp × 0.95`] : []),
-    // QA-flagg: kun biler >= 75k anker — billigbiler har strukturelt lav dLav%
-    // (flate kostnader) og 0-35k er beste retur-segment, skal ikke flagges.
-    ...((() => {
-      const ank = p.anchorUsed != null ? p.anchorUsed : ab.anker;
-      if (val.dLav != null && val.dLav <= 0) return ['🚩 QA: D lav ≤ 0 — ugyldig kalkyle, ikke send'];
-      if (ank >= 75000 && val.dLav != null && val.dLav < 0.65 * ank)
-        return [`🚩 QA: D lav er ${Math.round(100 * val.dLav / ank)}% av anker (<65%) — sjekk comp-cap/pool før utsending`];
-      return [];
-    })()),
-  ].join('\n');
+    const utakst = arm.usikkerhet_takst != null ? arm.usikkerhet_takst : arm.spenn;
+    const tilleggBud = arm.forhandlermargin_tillegg_bud;
+    function sideNum(v, side) {
+      if (v == null) return 0;
+      if (typeof v === 'object') {
+        const n = Number(side === 'hoy' ? v.hoy : v.lav);
+        return Number.isFinite(n) ? n : 0;
+      }
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    }
+    const marginBase = Number(arm.forhandlermargin) || 0;
+    const marginTot = {
+      lav: marginBase + sideNum(tilleggBud, 'lav'),
+      hoy: marginBase + sideNum(tilleggBud, 'hoy'),
+    };
+    const layers = [
+      ['Finn-utpris', arm.finn_utpris, false],
+      ['Origin-cap', arm.origin_cap, true],
+      ['Forhandlermargin', marginTot, true],
+      ['Ståtid', arm.statid, true],
+      ['Omregistrering', arm.omregistrering, true],
+      ['Transport', arm.transport, true],
+      ['Klargjøring', arm.klargjoring, true],
+      ['Usikkerhet takst', utakst, true],
+      ['Ordna-trekk', arm.ordna_trekk, true],
+      ['Vrakpant-gulv', arm.vrakpant_gulv, true],
+      ['Avrunding', arm.avrunding, true],
+      ['Peasy-avgift', arm.peasy_avgift, true],
+    ];
+    const lines = [`Arm:             ${armLabel}`];
+    {
+      const mid = arm.peasy_bud_mid != null ? arm.peasy_bud_mid : arm.estimertPeasyBud;
+      if (mid != null && Number.isFinite(Number(mid))) {
+        lines.push(('Peasy-bud midt:').padEnd(17) + ' ' + ffKr(mid, false));
+      }
+    }
+    const grunnKun = arm.finn_utpris_grunn === 'kun kundens annonse' || arm.finn_utpris_grunn === 'kun_kundens_annonse' || arm.finn_utpris_kilde === 'kun_kundens_annonse';
+    if (grunnKun) {
+      const ap = Number(arm.annonsepris);
+      const apTxt = Number.isFinite(ap) ? Math.round(ap).toLocaleString('nb-NO') : '–';
+      lines.push('⚠ Finn-utpris kun fra kundens annonse (' + apTxt + ' × 0,95)');
+    }
+    function layerZero(val) {
+      if (val == null) return true;
+      if (typeof val === 'object') {
+        const lav = Number(val.lav), hoy = Number(val.hoy);
+        return (!Number.isFinite(lav) || lav === 0) && (!Number.isFinite(hoy) || hoy === 0);
+      }
+      return Number(val) === 0;
+    }
+    for (const [lab, val, signed] of layers) {
+      if (lab !== 'Finn-utpris' && lab !== 'Forhandlermargin' && lab !== 'Peasy-avgift' && layerZero(val)) continue;
+      if (lab === 'Origin-cap') {
+        const foer = Number(arm.chefs_foer_cap);
+        const tak = Number(arm.origin_cap_tak != null ? arm.origin_cap_tak : arm.finn_utpris);
+        let cell = ffCell(val, signed);
+        if (Number.isFinite(foer) && Number.isFinite(tak) && !layerZero(val)) {
+          cell += ' · ' + Math.round(foer).toLocaleString('nb-NO') + ' → ' + Math.round(tak).toLocaleString('nb-NO');
+        }
+        lines.push(((lab + ':').padEnd(17) + ' ') + cell);
+        continue;
+      }
+      if (lab === 'Forhandlermargin') {
+        // Locked 2026-09-23: no herav 8%/12% (or other herav) rows.
+        lines.push(((lab + ':').padEnd(17) + ' ') + ffCell(val, signed));
+        continue;
+      }
+      lines.push(((lab + ':').padEnd(17) + ' ') + ffCell(val, signed));
+    }
+    if (ff && ff.statid_manuell && writeArm === 'A' && !layerZero(arm.statid)) {
+      lines.push('Ståtid over 60 d, vurder manuelt');
+    }
+    const lav = Number(arm.lav), hoy = Number(arm.hoy);
+    const lh = (!Number.isFinite(lav) && !Number.isFinite(hoy))
+      ? '–'
+      : (!Number.isFinite(hoy) ? ffKr(lav, false)
+        : (!Number.isFinite(lav) ? ffKr(hoy, false)
+          : (Math.round(lav).toLocaleString('nb-NO') + ' – ' + Math.round(hoy).toLocaleString('nb-NO'))));
+    lines.push(`Lav – høy:       ${lh}`);
+    const avLin = ffAvvikLine(arm);
+    if (avLin) lines.push(avLin);
+    if (val.dLav != null && val.dLav <= 0) lines.push('QA: D lav ≤ 0 — ugyldig kalkyle, ikke send');
+    kalkyleBody = lines.join('\n');
+  }
   out.push(B('KALKYLE'));
   out.push(forErp ? kalkyleBody : `<pre>${esc(kalkyleBody)}</pre>`);
   out.push('');
-  }
 
   // ── 8. Confidence + begrunnelse ──────────────────────────────
   out.push(B(`Confidence: ${anchor.confidence != null ? anchor.confidence : '?'}/100`));
@@ -368,9 +456,14 @@ function formatEvalCardHybrid(p, forErp = false) {
   // ── 12. ERP STATUS (kun ekte biler) ──────────────────────────
   if (bil.id) {
     const v = p.erpVerify || {};
+    const skipBy = p.erpSkipBy || null; // 'A' | 'B' | 'Ordna' når annen arm eier skriv
+    let dLavLine;
+    if (p.erpWritten) dLavLine = '✅ D lav/høy skrevet';
+    else if (skipBy) dLavLine = 'ERP: skrives av ' + skipBy;
+    else dLavLine = '❌ D lav/høy feilet';
     const statusFlags = [
-      p.erpWritten ? '✅ D lav/høy skrevet' : '❌ D lav/høy feilet',
-      (p.erpWritten || v.auctionType) ? '✅ Auction type satt' : '❌ Auction type feilet',
+      dLavLine,
+      (p.erpWritten || v.auctionType) ? '✅ Auction type satt' : (skipBy ? ('ERP: skrives av ' + skipBy) : '❌ Auction type feilet'),
       p.chatPosted ? '✅ Eval-kort postet' : '— Eval-kort ikke postet',
     ].join(' | ');
     out.push(B('ERP STATUS'));
@@ -385,4 +478,4 @@ function formatEvalCardHybrid(p, forErp = false) {
   return text;
 }
 
-module.exports = { formatEvalCardHybrid, fossefallLines };
+module.exports = { formatEvalCardHybrid };
