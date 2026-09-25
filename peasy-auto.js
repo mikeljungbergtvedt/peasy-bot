@@ -111,7 +111,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.162'; // scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.163'; // scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -3984,8 +3984,8 @@ async function refreshBracketsNightly() {
     // v20.159: takst-celler fra faktiske AR-bud → peasy-cells.json (heatmap i Pulse). Kaster aldri.
     try { await require('./takst-celler.js').oppdaterTakstCeller({ rows: all, getToken: getErpToken, log, logErr }); }
     catch (eTc) { logErr('takst-celler', eTc); }
-    // v20.162: lav i ERP mot fossefallet for bilens scenario (A/B/Ordna). Telegram bare ved avvik.
-    try { await require('./ab-kontroll.js').kjorABKontroll({ rows: all, log, logErr, sendTelegram }); }
+    // v20.163: lav i ERP mot fossefallet for bilens scenario (A/B/Ordna). E-post til Mike bare ved avvik.
+    try { await require('./ab-kontroll.js').kjorABKontroll({ rows: all, log, logErr, sendVarsel: (emne, tekst) => sendMail(emne, tekst) }); }
     catch (eAb) { logErr('ab-kontroll', eAb); }
   } catch (err) {
     logErr('refreshBracketsNightly', err);

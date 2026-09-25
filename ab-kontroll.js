@@ -2,7 +2,8 @@
 // ab-kontroll.js — daglig kontroll av at ERP har riktig lav for bilens scenario.
 // Scenario: Ordna hvis kilde er ordna, ellers internnr partall = A, oddetall = B (ab-arm.js).
 // Fasit: fossefallets lav for scenarioet i siste gyldige måling (tabellene live, ikke PRIS MANUELT).
-// Sjekkes mot lav i ERP (kolonne D «lav-høy»). Avvik over 100 kr → Telegram.
+// Sjekkes mot lav i ERP (kolonne D «lav-høy»). Avvik over 100 kr → e-post til Mike (sendMail).
+// Måling pares på internnr (erpId). Uten erpId: bare nyeste internnr for regnr (samme bil kan komme inn flere ganger).
 // Leser bare ERP-eksporten og lokale målinger. Skriver ingenting til ERP.
 
 const fs = require('fs');
@@ -33,9 +34,10 @@ function lavFraEstimat(v) {
 const NOKKEL = { A: 'a', B: 'b', ORDNA: 'ordna' };
 const NAVN = { A: 'A', B: 'B', ORDNA: 'Ordna' };
 
-/** Siste gyldige fossefall-måling per regnr. */
+/** Siste gyldige fossefall-måling per internnr (erpId) og per regnr. */
 function sisteMaaling(linjer) {
   const per = new Map();
+  const perInr = new Map();
   for (const r of linjer) {
     const ff = r && r.fossefall;
     if (!ff || typeof ff !== 'object' || ff.tables_live !== true || ff.pris_manuelt) continue;
@@ -43,17 +45,26 @@ function sisteMaaling(linjer) {
     const t = tid(r.timestamp);
     const reg = plate(r.regnr);
     if (!t || !reg) continue;
+    const inr = r.erpId != null && r.erpId !== '' ? String(r.erpId) : null;
+    const rec = { t, ff, erpId: inr };
     const f = per.get(reg);
-    if (!f || t >= f.t) per.set(reg, { t, ff });
+    if (!f || t >= f.t) per.set(reg, rec);
+    if (inr) { const g = perInr.get(inr); if (!g || t >= g.t) perInr.set(inr, rec); }
   }
-  return per;
+  return { per, perInr };
 }
 
 /**
  * rows: ERP-rader uten header. maalinger: målingslinjer. fra: ms — bare biler målt fra og med da.
  */
 function kontrollerAB({ rows, maalinger, fra, toleranse = TOLERANSE } = {}) {
-  const siste = sisteMaaling(maalinger || []);
+  const { per: siste, perInr } = sisteMaaling(maalinger || []);
+  const nyesteInr = new Map();
+  for (const r of rows || []) {
+    if (!Array.isArray(r)) continue;
+    const reg = plate(r[K.regnr]); const n = Number(r[K.internnr]);
+    if (reg && Number.isFinite(n) && (!nyesteInr.has(reg) || n > nyesteInr.get(reg))) nyesteInr.set(reg, n);
+  }
   const avvik = [];
   const ikkeSkrevet = [];
   const per = { A: 0, B: 0, ORDNA: 0 };
@@ -61,7 +72,12 @@ function kontrollerAB({ rows, maalinger, fra, toleranse = TOLERANSE } = {}) {
   for (const r of rows || []) {
     if (!Array.isArray(r)) continue;
     const reg = plate(r[K.regnr]);
-    const m = reg && siste.get(reg);
+    const inr = r[K.internnr] != null ? String(r[K.internnr]) : '';
+    let m = inr ? perInr.get(inr) : null;
+    if (!m && reg && Number(r[K.internnr]) === nyesteInr.get(reg)) {
+      m = siste.get(reg);
+      if (m && m.erpId && m.erpId !== inr) m = null; // målingen gjelder en annen rad for samme bil
+    }
     if (!m || (fra && m.t < fra)) continue;
     const scen = liveOwner(r[K.internnr], r[K.kilde]);
     const arm = m.ff[NOKKEL[scen]];
@@ -88,15 +104,15 @@ function tekst(res, timer) {
   return hode + ':\n' + linjer.join('\n') + (res.avvik.length > 15 ? `\n… og ${res.avvik.length - 15} til` : '');
 }
 
-/** Nattjobb. Telegram bare ved avvik. Kaster aldri. */
-async function kjorABKontroll({ rows, log, logErr, sendTelegram, timer = 24, fil } = {}) {
+/** Nattjobb. E-post bare ved avvik. Kaster aldri. */
+async function kjorABKontroll({ rows, log, logErr, sendVarsel, timer = 24, fil } = {}) {
   const L = log || console.log;
   try {
     const erpRader = rows || await require('./takst-celler.js').hentErpRader();
     const res = kontrollerAB({ rows: erpRader, maalinger: lesJsonl(fil || MAALING_FIL), fra: Date.now() - timer * 3600 * 1000 });
     const t = tekst(res, timer);
     L(t.split('\n')[0] + (res.ikke_skrevet.length ? ` (${res.ikke_skrevet.length} uten lav i ERP)` : ''));
-    if (res.avvik.length && sendTelegram) await sendTelegram('⚠️ ' + t);
+    if (res.avvik.length && sendVarsel) await sendVarsel(`Scenario-kontroll: ${res.avvik.length} biler med annen lav i ERP enn fossefallet`, t);
     return res;
   } catch (e) {
     if (logErr) logErr('ab-kontroll', e);
@@ -106,7 +122,7 @@ async function kjorABKontroll({ rows, log, logErr, sendTelegram, timer = 24, fil
 
 module.exports = { kontrollerAB, kjorABKontroll, tekst };
 
-// For hånd på Mini:  node ab-kontroll.js [timer]   (viser bare, sender ikke Telegram)
+// For hånd på Mini:  node ab-kontroll.js [timer]   (viser bare, sender ikke e-post)
 if (require.main === module) {
   const timer = Number(process.argv[2]) || 24;
   kjorABKontroll({ timer, log: () => {} }).then((res) => {

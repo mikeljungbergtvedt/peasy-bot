@@ -32,16 +32,24 @@ const rows = [
   rad(10014, 'NY10014', null),
   rad(10016, 'UM10016', '1-2'),                 // ingen måling
 ];
+// Samme bil inn flere ganger (NF78119 har fire internnr): bare riktig rad sjekkes.
+maalinger.push(Object.assign(m('RE20000', '2026-09-25T08:00:00Z', 170000, 153000, 127500), { erpId: 20002 }));
+rows.push(rad(20002, 'RE20000', '170000-180000'));  // riktig rad (erpId i målingen)
+rows.push(rad(19990, 'RE20000', '295000-300000'));  // gammel rad, samme regnr → ignoreres
+rows.push(rad(19980, 'RE20000', '150000-160000'));
+maalinger.push(m('UE30000', '2026-09-25T08:00:00Z', 60000, 54000, 45000));   // uten erpId:
+rows.push(rad(30002, 'UE30000', '60000-66000'));    //   nyeste internnr sjekkes
+rows.push(rad(29990, 'UE30000', '99000-99000'));    //   eldre ignoreres
 const res = k.kontrollerAB({ rows, maalinger, fra });
-assert.strictEqual(res.sjekket, 5);
-assert.deepStrictEqual(res.per_scenario, { A: 2, B: 2, ORDNA: 1 });
+assert.strictEqual(res.sjekket, 7);
+assert.deepStrictEqual(res.per_scenario, { A: 4, B: 2, ORDNA: 1 });
 assert.strictEqual(res.avvik.length, 1);
 assert.deepStrictEqual(
   { regnr: res.avvik[0].regnr, scenario: res.avvik[0].scenario, erp: res.avvik[0].erp, fossefall: res.avvik[0].fossefall, diff: res.avvik[0].diff },
   { regnr: 'CC10003', scenario: 'B', erp: 100000, fossefall: 90000, diff: 10000 });
 assert.deepStrictEqual(res.ikke_skrevet, ['NY10014']);
 const t = k.tekst(res, 24);
-assert.ok(/A 2, B 2, Ordna 1/.test(t));
+assert.ok(/A 4, B 2, Ordna 1/.test(t));
 assert.ok(/CC10003 \(10003\) B: ERP 100.000, fossefallet 90.000 \(\+10.000\)/.test(t), t);
 assert.ok(/0 med annen lav/.test(k.tekst(k.kontrollerAB({ rows: [], maalinger, fra }), 24)));
 
@@ -52,12 +60,13 @@ assert.ok(/0 med annen lav/.test(k.tekst(k.kontrollerAB({ rows: [], maalinger, f
   const naa = new Date().toISOString();
   fs.writeFileSync(fil, [m('CC10003', naa, 100000, 90000, 75000)].map((x) => JSON.stringify(x)).join('\n'));
   const sendt = [];
-  const r1 = await k.kjorABKontroll({ rows: [rad(10003, 'CC10003', '100000-110000')], fil, log: () => {}, sendTelegram: async (s) => sendt.push(s) });
+  const r1 = await k.kjorABKontroll({ rows: [rad(10003, 'CC10003', '100000-110000')], fil, log: () => {}, sendVarsel: async (emne, s) => sendt.push(emne + '|' + s) });
   assert.strictEqual(r1.avvik.length, 1);
   assert.strictEqual(sendt.length, 1);
-  const r2 = await k.kjorABKontroll({ rows: [rad(10003, 'CC10003', '90000-99000')], fil, log: () => {}, sendTelegram: async (s) => sendt.push(s) });
+  assert.ok(/^Scenario-kontroll: 1 biler/.test(sendt[0]));
+  const r2 = await k.kjorABKontroll({ rows: [rad(10003, 'CC10003', '90000-99000')], fil, log: () => {}, sendVarsel: async (emne, s) => sendt.push(emne + '|' + s) });
   assert.strictEqual(r2.avvik.length, 0);
-  assert.strictEqual(sendt.length, 1, 'ingen Telegram uten avvik');
+  assert.strictEqual(sendt.length, 1, 'ingen e-post uten avvik');
   const r3 = await k.kjorABKontroll({ rows: 'tull', fil: '/finnes/ikke', log: () => {}, logErr: () => {} });
   assert.ok(r3 && r3.sjekket === 0);
   fs.unlinkSync(fil);
