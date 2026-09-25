@@ -30,6 +30,9 @@ async function planQaAnker(opts) {
     soldDays: [],
   };
   if (opts.satser) ctx.satser = opts.satser;
+  // v20.166: ståtid bare når QA har huket av (statidKr ≤ 0). Ellers ingen ståtid i QA-omregning.
+  const qaStatid = opts.statidKr != null && opts.statidKr !== '' ? Number(opts.statidKr) : NaN;
+  ctx.statidKrQa = Number.isFinite(qaStatid) && qaStatid <= 0 ? Math.round(qaStatid) : 0;
   const built = buildFossefall(ctx);
   const card = fossefallCard.cardFromBuilt(built) || built;
   const arm = fossefallCard.abArm(opts.erpId, opts.source);
@@ -42,7 +45,7 @@ async function planQaAnker(opts) {
   if (!(dLav > 0) || !(dHoy > 0)) {
     return { ok: false, arm: arm, card: card, grunn: 'Lav/høy mangler for ' + arm };
   }
-  return { ok: true, arm: arm, card: card, dLav: dLav, dHoy: dHoy, auctionTypeId: dLav <= 35000 ? 2 : 1 };
+  return { ok: true, arm: arm, card: card, dLav: dLav, dHoy: dHoy, auctionTypeId: dLav <= 35000 ? 2 : 1, statidKr: ctx.statidKrQa };
 }
 
 module.exports = { planQaAnker };

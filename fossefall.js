@@ -948,7 +948,10 @@ function buildSharedFossefall(opts) {
     looked,
     originCapInfo,
   };
-  const statidKr = live ? statid.kr : 0;
+  // QA-godkjent ståtid (Pulse-hake → qa/anker statidKr) overstyrer automatisk ståtid. 0 = ingen.
+  const qaKr = opts.statidKrQa != null && opts.statidKrQa !== '' ? Number(opts.statidKrQa) : NaN;
+  const statidQa = Number.isFinite(qaKr) && qaKr <= 0;
+  const statidKr = statidQa ? Math.round(qaKr) : (live ? statid.kr : 0);
   // Locked: one fossefall → midt A; B/Ordna = scale × midt; same Spenn ned|opp per midt.
   const aRaw = computeSharedFossefall(Object.assign({}, base, { profile: 'a', statidKr }));
 
@@ -1042,8 +1045,9 @@ function buildSharedFossefall(opts) {
     statid_n_comps: statid.n_comps,
     statid_grunn: statid.grunn,
     statid_manuell: !!statid.manuell,
-    statid_kr: live ? (a.statid || 0) : statid.kr,
+    statid_kr: (live || statidQa) ? (a.statid || 0) : statid.kr,
     statid_a_live: live,
+    statid_qa: statidQa ? Math.round(qaKr) : null,
     pris_manuelt: false,
     signal: null,
     grunn: null,

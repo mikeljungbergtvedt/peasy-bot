@@ -40,7 +40,10 @@ function appendEasyMeasurement({ regnr, km, erpId, origin_cv, easyEval, timestam
         const vc = (easyEval && (easyEval.valgte_comps || (easyEval.finn_utpris && easyEval.finn_utpris.valgte_comps))) || [];
         _sold = extractSoldDays(vc);
       }
+      // v20.166: QA-godkjent ståtid (hake i Pulse) — samme tall som ble skrevet til ERP.
+      const _qaStatid = easyEval && easyEval.statid_qa_kr != null ? Number(easyEval.statid_qa_kr) : NaN;
       const _built = buildFossefall({
+        statidKrQa: Number.isFinite(_qaStatid) && _qaStatid <= 0 ? _qaStatid : undefined,
         finnUtpris: finn,
         km: km,
         modelYear: year,
@@ -64,6 +67,17 @@ function appendEasyMeasurement({ regnr, km, erpId, origin_cv, easyEval, timestam
       });
       const cardMod = require('./fossefall-card');
       fossefall = cardMod.cardFromBuilt(_built) || _built;
+      // v20.166: ståtid-forslag fra carinfo (vises i QA, trekkes aldri automatisk) og QA-godkjent ståtid.
+      try {
+        if (fossefall && typeof fossefall === 'object') {
+          if (origin_cv) {
+            fossefall.statid_forslag = require('./statid-forslag').statidForslag({ originCv: origin_cv, regnr: plate, finn, maalt: timestamp || new Date().toISOString() });
+          }
+          if (Number.isFinite(_qaStatid) && _qaStatid < 0) {
+            fossefall.statid_qa = { kr: Math.round(_qaStatid), kilde: (easyEval && easyEval.statid_qa_kilde) || null };
+          }
+        }
+      } catch (eSf) { /* forslaget er ikke-kritisk */ }
       // Measurement easy.dLav follows writing-arm fossefall lav when live (even=A).
       if (fossefall && fossefall.tables_live && !fossefall.pris_manuelt && fossefall.a && Number.isFinite(Number(fossefall.a.lav))) {
         const plan = cardMod.planErpWrite({ erpId: erpId, source: (easyEval && easyEval.source) || null, card: fossefall, legacyLav: easyObj.dLav, legacyHoy: easyObj.dHoy });

@@ -655,6 +655,8 @@ if (req.method === 'GET' && reqPath === '/ai-usage') {
             anker,
             source: payload.source,
             km: payload.km,
+            statidKr: payload.statidKr,     // v20.166: QA-hake for ståtid (≤ 0), ellers uten
+            statidKilde: payload.statidKilde || null,
           });
           const ok = !!(result && result.ok);
           res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json' });

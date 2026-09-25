@@ -111,7 +111,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.165'; // eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.166'; // ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -4248,7 +4248,9 @@ async function main() {
     });
     wh.setAnkerFn(async function(payload) {
       const regnr = String(payload.regnr || '').toUpperCase().replace(/\s/g, '');
-      const anker = Math.round(parseInt(payload.anker, 10) / 1000) * 1000;
+      // v20.166: ståtid-haken sender bilens eksisterende Finn-utpris — den rundes ikke av på nytt.
+      const _harStatid = payload.statidKr != null && payload.statidKr !== '';
+      const anker = _harStatid ? Math.round(parseInt(payload.anker, 10)) : Math.round(parseInt(payload.anker, 10) / 1000) * 1000;
       if (!regnr || !Number.isFinite(anker) || anker < 5000) throw new Error('regnr og anker kreves');
       const kmAnkerBlock = require('./km-qa-block').findKmBlock(regnr);
       if (kmAnkerBlock && kmAnkerBlock.blocked) throw new Error(kmAnkerBlock.message);
@@ -4271,7 +4273,7 @@ async function main() {
       // v20.154: manuell Finn-utpris går gjennom fossefallet (tabellene) for A, B og Ordna.
       // Før: calcValuation (A) og setV3gAnker (B/Ordna), og målingen manglet årsmodell → omreg for 2020 → PRIS MANUELT i Pulse.
       const { planQaAnker } = require('./qa-anker-plan');
-      const plan = await planQaAnker({ anker, km, year, egenvekt, erpId, source,
+      const plan = await planQaAnker({ anker, km, year, egenvekt, erpId, source, statidKr: payload.statidKr,
         isVarebil: !!(d && d.vegData && (d.vegData.isVarebil || /varebil/i.test(d.vegData.avgiftsgruppe || ''))) });
       if (!plan.ok) {
         log('[qa-anker] ' + regnr + ' anker=' + anker + ' PRIS MANUELT: ' + plan.grunn);
@@ -4294,7 +4296,9 @@ async function main() {
             egenvekt: egenvekt,
             source: source,
             anker_kilde: 'qa',
-            begrunnelse_kort: 'QA manuell Finn-utpris',
+            begrunnelse_kort: plan.statidKr ? 'QA manuell Finn-utpris + ståtid ' + plan.statidKr : 'QA manuell Finn-utpris',
+            statid_qa_kr: plan.statidKr || 0,
+            statid_qa_kilde: payload.statidKilde || null,
             chefs: { merge: { finn_utpris: anker, method: 'qa', begrunnelse: 'QA manuell Finn-utpris' } },
           },
         });
@@ -4303,9 +4307,9 @@ async function main() {
       try { if (typeof _bilCache !== 'undefined' && _bilCache) _bilCache.delete(regnr); } catch (_) {}
       try { await pushEasyOverride(regnr, erpId, anker, nyVal); } catch (eOv) { logErr('qa-anker override', eOv); }
       try {
-        await maybePostToChat(target, erpId, 'ENDRE ANKER FRA QA ' + regnr + '\nANKER ' + anker + '\nD lav ' + nyVal.dLav + '\nD høy ' + nyVal.dHoy, tok);
+        await maybePostToChat(target, erpId, 'ENDRE ANKER FRA QA ' + regnr + '\nANKER ' + anker + (plan.statidKr ? '\nSTÅTID ' + plan.statidKr + ' (godkjent i QA, kilde carinfo)' : '') + '\nD lav ' + nyVal.dLav + '\nD høy ' + nyVal.dHoy, tok);
       } catch (eC) { logErr('qa-anker kort', eC); }
-      log('[qa-anker] fossefall ' + plan.arm + ' ' + regnr + ' anker=' + anker + ' dLav=' + nyVal.dLav + ' dHoy=' + nyVal.dHoy);
+      log('[qa-anker] fossefall ' + plan.arm + ' ' + regnr + ' anker=' + anker + (plan.statidKr ? ' ståtid=' + plan.statidKr : '') + ' dLav=' + nyVal.dLav + ' dHoy=' + nyVal.dHoy);
       return {
         ok: true,
         regnr,
@@ -4315,6 +4319,7 @@ async function main() {
         anker,
         dLav: nyVal.dLav,
         dHoy: nyVal.dHoy,
+        statidKr: plan.statidKr || 0,
         kalkyle: 'fossefall',
       };
     });
