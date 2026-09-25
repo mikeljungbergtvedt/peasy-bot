@@ -5,7 +5,48 @@
 const assert = require('assert');
 const ff = require('./fossefall');
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.157');
+// v20.158: avvik bare på eier-armen, egenvekt-fallback som årsak bare når den kan forklare avviket.
+{
+  const kort = () => ({
+    a: { lav: 100000, hoy: 116000, finn_utpris: 150000 },
+    b: { lav: 89000, hoy: 105000, finn_utpris: 150000 },
+    ordna: { lav: 75000, hoy: 87000, finn_utpris: 150000 },
+  });
+  const vekt0 = { year: 2016 }; // personbil 2016 uten egenvekt: omreg kan flytte 1 296
+  const hint = { egenvekt_mangler: true, anker_lagret: 150000 };
+  // VH71757-mønster: B eier bilen, B-tallene er skrevet → ingen avvik noe sted.
+  let k = ff.settAvvikForEier(kort(), 'B', { dLav: 89000, dHoy: 105000 }, hint, vekt0);
+  assert.strictEqual(k.a.avvik_kr, null);
+  assert.strictEqual(k.b.avvik_kr, null);
+  assert.strictEqual(k.ordna.avvik_kr, null);
+  // A eier og det skrevne avviker 5 000 → avvik på A, egenvekt bare som merknad.
+  k = ff.settAvvikForEier(kort(), 'A', { dLav: 105000, dHoy: 121000 }, hint, vekt0);
+  assert.strictEqual(k.a.avvik_kr.lav, 5000);
+  assert.strictEqual(k.a.avvik_kr.aarsak, 'ukjent');
+  assert.strictEqual(k.a.avvik_kr.merknad, 'egenvekt-fallback');
+  assert.strictEqual(k.b.avvik_kr, null);
+  // Avvik innenfor det omreg kan flytte (1 296 + 1 000) → egenvekt er årsak.
+  k = ff.settAvvikForEier(kort(), 'A', { dLav: 98000, dHoy: 114000 }, hint, vekt0);
+  assert.strictEqual(k.a.avvik_kr.aarsak, 'egenvekt-fallback');
+  assert.strictEqual(k.a.avvik_kr.merknad, undefined);
+  // Eldre bil (samme omreg uansett vekt) → aldri årsak.
+  k = ff.settAvvikForEier(kort(), 'A', { dLav: 99000, dHoy: 115000 }, hint, { year: 2010 });
+  assert.strictEqual(k.a.avvik_kr.aarsak, 'ukjent');
+  assert.strictEqual(k.a.avvik_kr.merknad, 'egenvekt-fallback');
+  // Ordna eier → avvik bare på Ordna.
+  k = ff.settAvvikForEier(kort(), 'ORDNA', { dLav: 70000, dHoy: 87000 }, {}, vekt0);
+  assert.strictEqual(k.ordna.avvik_kr.lav, -5000);
+  assert.strictEqual(k.a.avvik_kr, null);
+  // lagretForEier legger båndet under riktig arm.
+  assert.deepStrictEqual(Object.keys(ff.lagretForEier('B', { dLav: 1, dHoy: 2 }, {}).lagret), ['b']);
+  assert.deepStrictEqual(Object.keys(ff.lagretForEier('A', { dLav: 1, dHoy: 2 }, {}).lagret), ['a']);
+  assert.deepStrictEqual(ff.lagretForEier('B', { dLav: null, dHoy: null }, {}).lagret, {});
+  assert.strictEqual(ff.egenvektOmregSpenn({ year: 2024 }), 7505 - 4918);
+  assert.strictEqual(ff.egenvektOmregSpenn({ year: 2024, egenvekt: 1100 }), 0);
+  assert.strictEqual(ff.egenvektOmregSpenn({ year: 2024, isVarebil: true }), 0);
+}
+
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.158');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {

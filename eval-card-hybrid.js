@@ -301,7 +301,9 @@ function formatEvalCardHybrid(p, forErp = false) {
     if (hasLav && hasHoy && lav !== hoy) nums = ffKr(lav, true) + ' / ' + ffKr(hoy, true);
     else nums = ffKr(hasLav ? lav : hoy, true);
     const aarsak = av.aarsak ? (' · ' + String(av.aarsak)) : '';
-    return `Avvik:          ${nums}${aarsak}`;
+    // v20.167: egenvekt-fallback som forklarer ikke avviket, vises som egen merknad.
+    const merknad = av.merknad ? ('\nMerknad:        ' + String(av.merknad).replace('egenvekt-fallback', 'egenvekt mangler (reserve 1 500 kg)')) : '';
+    return `Avvik:          ${nums}${aarsak}${merknad}`;
   }
 
   let kalkyleBody;

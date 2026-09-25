@@ -9,7 +9,7 @@ const { easyField } = require('./shared/easy-meas-field.js');
 const MEASUREMENTS_FILE = process.env.PEASY_EASY_MEAS_FILE
   || path.join(__dirname, 'v2/logs.nosync/measurements.jsonl');
 
-function appendEasyMeasurement({ regnr, km, erpId, origin_cv, easyEval, timestamp, soldDays } = {}) {
+function appendEasyMeasurement({ regnr, km, erpId, source, origin_cv, easyEval, timestamp, soldDays } = {}) {
   const plate = String(regnr || '').toUpperCase().replace(/\s/g, '');
   if (!plate) return { ok: false, error: 'regnr mangler' };
   let fossefall = null;
@@ -42,16 +42,21 @@ function appendEasyMeasurement({ regnr, km, erpId, origin_cv, easyEval, timestam
       }
       // v20.166: QA-godkjent ståtid (hake i Pulse) — samme tall som ble skrevet til ERP.
       const _qaStatid = easyEval && easyEval.statid_qa_kr != null ? Number(easyEval.statid_qa_kr) : NaN;
+      const _eier = require('./fossefall').lagretForEier(
+        require('./ab-arm.js').liveOwner(erpId, source || (easyEval && easyEval.source)),
+        { dLav: easyObj.dLav, dHoy: easyObj.dHoy },
+        hintsA
+      );
       const _built = buildFossefall({
         statidKrQa: Number.isFinite(_qaStatid) && _qaStatid <= 0 ? _qaStatid : undefined,
         finnUtpris: finn,
         km: km,
         modelYear: year,
         bilInfo: { year: year || 2020, egenvekt: egenvekt || undefined },
-        lagret: Number.isFinite(Number(easyObj.dLav))
-          ? { a: { dLav: easyObj.dLav, dHoy: easyObj.dHoy } }
-          : {},
-        hints: { a: hintsA },
+        // v20.167: dLav/dHoy er det som ble skrevet til ERP, altså eier-armens tall (A, B eller Ordna).
+        // Avviket regnes mot den armen, ikke alltid mot A.
+        lagret: _eier.lagret,
+        hints: Object.keys(_eier.hints).length ? _eier.hints : { a: hintsA },
         soldDays: _sold,
         annonsepris: (easyObj.annonsepris != null ? easyObj.annonsepris : (easyObj.finn_price != null ? easyObj.finn_price : (easyEval && easyEval.finn_price))) || null,
         chefsUtprisBeforeCap: (function(){

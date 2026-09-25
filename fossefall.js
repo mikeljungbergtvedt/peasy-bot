@@ -23,7 +23,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.157';
+const FOSSEFALL_VERSION = 'v20.158';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -126,6 +126,17 @@ function omreg(bilInfo) {
     else kr = 1942;
   }
   return { kr, note: usedFallback ? 'reserveverdi år/vekt' : null };
+}
+
+// v20.158: hvor mye kan manglende egenvekt flytte omreg-beløpet for denne bilen?
+// Reserven er 1500 kg. Beløpet er ulikt for lett (≤1200 kg) og tung bil bare for personbil fra 2015.
+// Varebil og eldre biler har samme sats, da er svaret 0.
+function egenvektOmregSpenn(bilInfo) {
+  const bi = bilInfo || {};
+  if (bi.egenvekt) return 0;
+  const lett = omreg(Object.assign({}, bi, { egenvekt: 1000 })).kr;
+  const tung = omreg(Object.assign({}, bi, { egenvekt: 1500 })).kr;
+  return Math.abs(tung - lett);
 }
 
 function identifySegment(km, modelYear) {
@@ -425,12 +436,21 @@ function makeAvvik(lag, stored, hints) {
   const reasons = [];
   if (hints.km_override) reasons.push('km-override');
   if (hints.origin_cap) reasons.push('origin-cap');
-  if (hints.vrakpant || (lag._meta && lag._meta.vrakpant)) reasons.push('vrakpant-gulv');
+  if (hints.vrakpant || (lag._meta && lag._meta.vrakpant) || vrakpantLoftet(lag)) reasons.push('vrakpant-gulv');
   if (hints.anker_lagret != null && Number.isFinite(Number(hints.anker_lagret))) {
     const aLagret = Number(hints.anker_lagret);
     if (roundKr(aLagret) !== lag.finn_utpris && aLagret !== lag.finn_utpris) reasons.push('annet-anker');
   }
-  if (hints.egenvekt_mangler) reasons.push('egenvekt-fallback');
+  // v20.158: egenvekt-fallback er årsak bare når egenvekten faktisk endrer omreg-beløpet.
+  // Ellers er det en merknad ved siden av avviket, ikke forklaringen på det.
+  // Årsak: omreg flyttes av egenvekten, og avviket er ikke større enn det omreg kan flytte (+ avrunding 1000).
+  const merknader = [];
+  if (hints.egenvekt_mangler) {
+    const spenn = Number(hints.egenvekt_omreg_spenn) || 0;
+    const storst = Math.max(Math.abs(dLav), Math.abs(dHoy));
+    if (spenn > 0 && storst <= spenn + 1000) reasons.push('egenvekt-fallback');
+    else merknader.push('egenvekt-fallback');
+  }
   if (hints.aar_mangler) reasons.push('aar-fallback');
   if (hints.wrecker) reasons.push('wrecker');
   const avr = lag.avrunding || {};
@@ -438,13 +458,70 @@ function makeAvvik(lag, stored, hints) {
     reasons.push('avrunding>1000');
   }
   if (!reasons.length) reasons.push('ukjent');
-  return {
+  const out = {
     lav: dLav,
     hoy: dHoy,
     aarsak: reasons.join(','),
     lagret: { dLav: sLav, dHoy: sHoy },
     formel: { dLav: lag.lav, dHoy: lag.hoy },
   };
+  if (merknader.length) out.merknad = merknader.join(',');
+  return out;
+}
+
+function vrakpantLoftet(lag) {
+  const v = lag && lag.vrakpant_gulv;
+  if (!v || typeof v !== 'object') return false;
+  return (Number(v.lav) || 0) > 0 || (Number(v.hoy) || 0) > 0;
+}
+
+// v20.158: avvik regnes bare på armen som eier bilen (liveOwner i ab-arm.js: A, B eller ORDNA).
+// Det lagrede båndet er det som ble skrevet til ERP, altså eier-armens tall.
+// Å sammenligne B-tall med A ga falske avvik (VH71757: −11 000 på A).
+function eierArmKey(eier) {
+  const s = String(eier || 'A').trim().toUpperCase();
+  if (s === 'ORDNA' || s === 'O') return 'ordna';
+  if (s === 'B') return 'b';
+  return 'a';
+}
+
+function harKr(v) {
+  if (v == null || v === '') return false;
+  return Number.isFinite(Number(v));
+}
+
+function lagretForEier(eier, band, hint) {
+  const key = eierArmKey(eier);
+  const lagret = {};
+  const hints = {};
+  if (harKr(band && band.dLav) && harKr(band && band.dHoy)) {
+    lagret[key] = { dLav: band.dLav, dHoy: band.dHoy };
+    if (hint) hints[key] = hint;
+  }
+  return { lagret, hints };
+}
+
+function medEgenvektHint(hints, bilInfo) {
+  const ut = {};
+  const spenn = egenvektOmregSpenn(bilInfo);
+  for (const k of Object.keys(hints || {})) {
+    ut[k] = Object.assign({}, hints[k], { egenvekt_omreg_spenn: spenn });
+  }
+  return ut;
+}
+
+// Setter avviket på et ferdig kort etter at ERP-tallet er kjent. Andre armer får ikke avvik.
+function settAvvikForEier(ff, eier, band, hint, bilInfo) {
+  if (!ff || typeof ff !== 'object') return ff;
+  const key = eierArmKey(eier);
+  const h = Object.assign({}, hint || {}, { egenvekt_omreg_spenn: egenvektOmregSpenn(bilInfo) });
+  for (const k of ['a', 'b', 'ordna']) {
+    const arm = ff[k];
+    if (!arm || typeof arm !== 'object') continue;
+    const harBand = band && harKr(band.dLav) && harKr(band.dHoy);
+    arm.avvik_kr = (k === key && harBand) ? makeAvvik(arm, band, h) : null;
+  }
+  return ff;
 }
 
 function stripMeta(lag) {
@@ -1024,7 +1101,7 @@ function buildSharedFossefall(opts) {
   applyVrakpantGulv(oRaw);
 
   const lagret = opts.lagret || {};
-  const hints = opts.hints || {};
+  const hints = medEgenvektHint(opts.hints || {}, bilInfo);
   const a = stripMeta(aRaw);
   const b = stripMeta(bRaw);
   const ordna = stripMeta(oRaw);
@@ -1073,7 +1150,7 @@ function buildLegacyFossefall(opts) {
   const modelYear = Number(opts.modelYear) || Number(opts.bilInfo && opts.bilInfo.year) || 2020;
   const bilInfo = Object.assign({ year: modelYear }, opts.bilInfo || {});
   const lagret = opts.lagret || {};
-  const hints = opts.hints || {};
+  const hints = medEgenvektHint(opts.hints || {}, bilInfo);
   const originCapInfo = resolveOriginCap(opts, finn);
 
   const aRaw0 = computeA(finn, bilInfo, originCapInfo);
@@ -1235,6 +1312,9 @@ module.exports = {
   CONFIG_URL,
   buildFossefall,
   buildSharedFossefall,
+  lagretForEier,
+  settAvvikForEier,
+  egenvektOmregSpenn,
   computeSharedFossefall,
   lookupFossefallCell,
   loadFossefallSatser,
@@ -1249,6 +1329,7 @@ module.exports = {
   finalizeAvrunding,
   statidALive,
   _internal: {
+    makeAvvik,
     computeA,
     computeBand,
     computeStatid,

@@ -87,6 +87,7 @@ function writeEasyMeasurement(regnr, erpId, bil, originCV, payloadJson) {
     require("./easy-measurements").appendEasyMeasurement({
       regnr,
       erpId,
+      source: bil && bil.source,
       km: bil && bil.mileage,
       origin_cv: originCV || null,
       easyEval: parsed && parsed.easy_eval,
@@ -111,7 +112,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.166'; // ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.167'; // avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -3258,6 +3259,7 @@ async function evalCar(bil, page, cache, opts = {}) {
     // 8. Fossefall først (locked scale), så ERP-lav = writing arm's fossefall lav.
     let _ffCard = null;
     let _writeArm = 'A';
+    let _fuAvvik = null;
     try {
       const { liveOwner } = require('./ab-arm.js');
       const owner = liveOwner(erpId, bil && bil.source);
@@ -3269,10 +3271,9 @@ async function evalCar(bil, page, cache, opts = {}) {
         : (Number.isFinite(Number(anchor && anchor.price)) ? Number(anchor.price) : null);
       const _lagret = {};
       const _hints = {};
-      if (Number.isFinite(Number(valuation && valuation.dLav))) {
-        _lagret.a = { dLav: valuation.dLav, dHoy: valuation.dHoy };
-        _hints.a = { anker_lagret: _fu };
-      }
+      // v20.167: valuation her er før fossefallet (gammel kalkyle). Avviket settes etter ERP-skriv,
+      // mot armen som eier bilen (_writeArm), med tallet som faktisk ble skrevet.
+      _fuAvvik = _fu;
       let _soldDaysCard = [];
       try {
         const vc = (v2 && v2.anchor && v2.anchor.valgte_comps)
@@ -3358,6 +3359,14 @@ async function evalCar(bil, page, cache, opts = {}) {
       fuel: !(vegData.isHybrid || false),
       kw: false
     });
+    // v20.167: avvik = tallet som ble skrevet (valuation) mot formelen på eier-armen. Andre armer: ikke avvik.
+    try {
+      require('./fossefall').settAvvikForEier(_ffCard, _writeArm,
+        { dLav: valuation.dLav, dHoy: valuation.dHoy },
+        { anker_lagret: _fuAvvik, egenvekt_mangler: !bil.egenvekt },
+        { year: (vegData && vegData.firstRegYear) || bil.model_year || 0, egenvekt: bil.egenvekt,
+          isVarebil: !!(vegData && (vegData.isVarebil || /varebil/i.test(vegData.avgiftsgruppe || ''))) });
+    } catch (eAvvik) { logErr('fossefall-avvik', eAvvik); }
     // 10. Bygg eval-kort (hybrid: Easy topp/bunn + v2 comps/anker/risiko)
     // Fossefall allerede bygget før ERP-skriv (v20.150).
     const cardParams = {
