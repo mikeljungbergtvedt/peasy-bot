@@ -76,6 +76,14 @@ assert.strictEqual(aa.celle, '60-100|50-120');
 assert.strictEqual(aa.salaer, 2200);
 assert.strictEqual(aa.paakost, 19268);
 assert.strictEqual(aa.raatten, false);
+// Spenn: lav i dag = 95 000 − 8 000 − 5 500 − 4 532 − 1 000 = 75 968 → AR-bud 73 768 (salær 2 200)
+// − avgift 8 900 = 64 868 → midt 65 000 − ned 6 000 = lav 59 000. Peasy-bud 50 100 < lav.
+assert.strictEqual(aa.lav_idag, 59000);
+assert.strictEqual(aa.over_lav, false);
+assert.deepStrictEqual(d.celler['60-100|50-120'].spenn, { ned_tabell: 6000, opp_tabell: 4000, n: 1, over_lav: 0, over_lav_andel: 0, ned_forslag: null });
+// Eldre og råtne biler teller ikke i spenn
+assert.strictEqual(d.biler.find((b) => b.internnr === '3').over_lav, null);
+assert.strictEqual(d.biler.find((b) => b.internnr === '4').over_lav, null);
 
 // BB22222: V3G 105 000. 100-150|120-200, margin 12 500.
 // salær 2,7 % av 80 000 = 2 160 → min 2 200. 105 000 − 80 000 − 12 500 − 4 532 − 1 000 − 2 200 = 4 768
@@ -136,6 +144,8 @@ for (let i = 0; i < 20; i++) {
 const d20 = tc.byggTakstCeller({ rows: mange, kilder: mangeKilder, satser });
 assert.strictEqual(d20.celler['60-100|50-120'].n, 20);
 assert.ok(d20.celler['60-100|50-120'].forslag > 0, 'forslag ved 20 bud');
+// Påkost 19 268 … 21 168 (Finn +100 per bil): p80 − median = 20 788 − 20 218 → ned-forslag 600
+assert.strictEqual(d20.celler['60-100|50-120'].spenn.ned_forslag, 600);
 
 // Ingen regnr i ut-filen (Pages er offentlig)
 assert.ok(!JSON.stringify(d).includes('AA11111'));

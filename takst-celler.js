@@ -16,10 +16,11 @@ const fs = require('fs');
 const path = require('path');
 const fossefall = require('./fossefall');
 
-const VERSJON = 'takst-celler v2';
+const VERSJON = 'takst-celler v3';
 const FRA_DATO = '2025-11-01';
 const FORSLAG_VED_N = 20;
 const RAATTEN_GRENSE = -0.40;
+const SPENN_MAAL = 0.80; // andel bud som skal lande over lav
 const GH_REPO = 'mikeljungbergtvedt/mikeljungbergtvedt.github.io';
 const GH_FILE = 'peasy-cells.json';
 const ERP_XLSX_URL = 'https://api.biladministrasjon.no/public/reports/peasy/dhqui7Hkl54?output=xlsx';
@@ -78,12 +79,15 @@ function salaerPaaBud(bud, pct, min) {
   return Math.round(Math.max(bud * p / 100, m));
 }
 
-/** Omregistrering slik fossefallet regner den (år og egenvekt), uten å kopiere satsene. */
-function omregFor(finn, km, aar, egenvekt, satser, looked) {
-  const arm = fossefall.computeSharedFossefall({
-    finnUtpris: finn, km, modelYear: aar, satser, looked,
+/** A-armen slik fossefallet regner den i dag (samme tabeller, år, egenvekt, ståtid). */
+function armIdag(finn, km, aar, egenvekt, satser, looked, statid) {
+  return fossefall.computeSharedFossefall({
+    finnUtpris: finn, km, modelYear: aar, satser, looked, statidKr: statid || 0,
     bilInfo: egenvekt ? { year: aar, egenvekt } : { year: aar },
   });
+}
+/** Omregistrering slik fossefallet regner den (år og egenvekt), uten å kopiere satsene. */
+function omregFor(arm) {
   const kr = arm && arm._meta && Number(arm._meta.omregKr);
   return Number.isFinite(kr) ? kr : 4532;
 }
@@ -184,7 +188,8 @@ function byggTakstCeller({ rows, kilder, satser, naa } = {}) {
     if (!looked || !looked.ok) { telle.utenfor_tabell++; continue; }
 
     const aar = positiv(r[K.aar]) || 2020;
-    const omreg = m.omreg != null ? m.omreg : omregFor(m.finn, km, aar, m.egenvekt, satser, looked);
+    const arm = armIdag(m.finn, km, aar, m.egenvekt, satser, looked, m.statid);
+    const omreg = m.omreg != null ? m.omreg : omregFor(arm);
     const salaer = salaerPaaBud(bud, looked.salaerPct, looked.salaerMin);
     const paakost = Math.round(m.finn - bud - looked.margin + m.statid - omreg - fossefall.KLARGJORING_KR - salaer);
 
@@ -195,12 +200,17 @@ function byggTakstCeller({ rows, kilder, satser, naa } = {}) {
     const status = String(r[K.status] || '').toLowerCase();
     const retur = !!String(r[K.retur] || '').trim() || status.indexOf('return') >= 0;
 
-    const c = celler[looked.cell] || (celler[looked.cell] = { verdier: [], n_bud: 0, n_gammel: 0, n_retur: 0, utelatt_raatne: 0, tabell: looked.takst });
+    // Spenn: lander Peasy-budet over lav slik tabellene er i dag (A-scenario)?
+    const lavIdag = arm && !arm.skip && Number.isFinite(Number(arm.lav)) ? Number(arm.lav) : null;
+    const overLav = !m.gammel && !raatten && lavIdag != null && peasyBud != null ? peasyBud >= lavIdag : null;
+
+    const c = celler[looked.cell] || (celler[looked.cell] = { verdier: [], n_bud: 0, n_gammel: 0, n_retur: 0, utelatt_raatne: 0, tabell: looked.takst, spenn: looked.spenn, n_spenn: 0, over_lav: 0 });
     c.n_bud++;
     if (retur) c.n_retur++;
     if (m.gammel) { c.n_gammel++; telle.gammel++; }
     else if (raatten) { c.utelatt_raatne++; telle.raatne++; }
     else { c.verdier.push(paakost); telle.med++; }
+    if (overLav != null) { c.n_spenn++; if (overLav) c.over_lav++; }
     telle.kilde[m.kilde] = (telle.kilde[m.kilde] || 0) + 1;
 
     biler.push({
@@ -214,6 +224,8 @@ function byggTakstCeller({ rows, kilder, satser, naa } = {}) {
       statid: m.statid,
       paakost,
       mot_lav: motLav != null ? Math.round(motLav * 1000) / 1000 : null,
+      lav_idag: lavIdag,
+      over_lav: overLav,
       raatten,
       retur,
       gammel: m.gammel,
@@ -238,6 +250,15 @@ function byggTakstCeller({ rows, kilder, satser, naa } = {}) {
       tabell: c.tabell,
       avvik: med == null || c.tabell == null ? null : r100(med - c.tabell),
       forslag: n >= FORSLAG_VED_N ? Math.max(0, r100(med)) : null,
+      spenn: {
+        ned_tabell: c.spenn ? c.spenn.ned : null,
+        opp_tabell: c.spenn ? c.spenn.opp : null,
+        n: c.n_spenn,
+        over_lav: c.over_lav,
+        over_lav_andel: c.n_spenn ? Math.round(c.over_lav / c.n_spenn * 100) / 100 : null,
+        // ned slik at SPENN_MAAL av bilene lander over lav når takst = median påkost
+        ned_forslag: n >= FORSLAG_VED_N ? Math.max(0, r100(kvantil(c.verdier, SPENN_MAAL) - med)) : null,
+      },
     };
   });
 
@@ -251,6 +272,7 @@ function byggTakstCeller({ rows, kilder, satser, naa } = {}) {
       raatten: 'Peasy-bud mer enn 40 % under estimat lav holdes utenfor medianen',
       gammel: 'Biler med bare gammelt anker eller Finn-pris fra ERP-kommentaren telles i n_bud (heatmap), ikke i median eller forslag',
       fra: FRA_DATO,
+      spenn: 'Over lav = Peasy-bud (ERP kol. E) ≥ lav slik tabellene er i dag (A). Ned-forslag: ' + Math.round(SPENN_MAAL * 100) + ' % over lav når takst = median påkost, ved 20 nye bud',
     },
     totalt: telle,
     celler: ut,
