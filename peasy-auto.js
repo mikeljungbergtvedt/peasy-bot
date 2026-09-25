@@ -111,7 +111,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.160'; // takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.161'; // postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -729,7 +729,9 @@ async function verifyErpStatus(erpId, token) {
 async function postToChat(erpId, evalText, token) {
   const checkRes = await fetch(`${CONFIG.erp.base}/c2b_module/driveno/${erpId}/comments/all`, { headers: authH(token) });
   const checkData = await checkRes.json();
-  const existing = Array.isArray(checkData.data) ? checkData.data : [];
+  // v20.161: ERP svarer { data: { comments: [...] } } — før ble lista aldri funnet, så sjekken slo aldri inn.
+  const existing = Array.isArray(checkData.data) ? checkData.data
+    : (checkData.data && Array.isArray(checkData.data.comments) ? checkData.data.comments : []);
   if (existing.some(c => (c.comment || '').includes('BIL TIL ESTIMERING'))) {
     log(`Kommentar: bil ${erpId} har allerede eval-kort — skipper`);
     return false;
