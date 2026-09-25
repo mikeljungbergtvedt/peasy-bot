@@ -111,7 +111,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.164'; // nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.165'; // eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1926,7 +1926,7 @@ function calcValuation(anchorPrice, segment, pool, bilContext) {
   const auctionTypeId = dLav <= 35000 ? 2 : 1;
   const bd = ek.breakdown || {};
   const reg = ctx.regnr;
-  log('Kalkyle [easy-cost-v7] [' + (segment || '') + ']: anker=' + anker + ' margin=' + bd.margin + ' omreg=' + bd.omreg + ' klarg=' + bd.klargjoring + ' paakost=' + bd.paakostHoy + ' T=' + Math.round(bd.budLav) + '-' + Math.round(bd.budHoy) + ' fee=' + bd.feeLav + '/' + bd.feeHoy + ' dLav=' + dLav + ' dHoy=' + dHoy + ' E=' + E + ' (' + bracket + ')' + (ek.vrakpant ? ' vrakpant' : '') + (reg ? ' ' + reg : ''));
+  log('Kalkyle [easy-cost-v7, bare sammenligning — ERP får fossefallet] [' + (segment || '') + ']: anker=' + anker + ' margin=' + bd.margin + ' omreg=' + bd.omreg + ' klarg=' + bd.klargjoring + ' paakost=' + bd.paakostHoy + ' T=' + Math.round(bd.budLav) + '-' + Math.round(bd.budHoy) + ' fee=' + bd.feeLav + '/' + bd.feeHoy + ' dLav=' + dLav + ' dHoy=' + dHoy + ' E=' + E + ' (' + bracket + ')' + (ek.vrakpant ? ' vrakpant' : '') + (reg ? ' ' + reg : ''));
   return {
     T: expected, t88: expected, minMarginUsed: false, margin: bd.margin, fee: (bd.feeHoy != null ? bd.feeHoy : bd.fee), dMid: expected,
     dLav, dHoy, E, xPct, bracket, auctionTypeId, spreadPct: anker ? spread / anker : 0, spread,
@@ -3316,6 +3316,7 @@ async function evalCar(bil, page, cache, opts = {}) {
       if (plan && Number.isFinite(Number(plan.dLav)) && Number.isFinite(Number(plan.dHoy))) {
         valuation.dLav = Number(plan.dLav);
         valuation.dHoy = Number(plan.dHoy);
+        log(`Fossefall ${regnr} scenario ${_writeArm}: Finn-utpris ${_fu} celle ${(_ffCard && _ffCard.celleId) || '?'} → lav–høy ${valuation.dLav}–${valuation.dHoy} (dette skrives til ERP)`);
         if (Number.isFinite(Number(valuation.dLav))) {
           valuation.auctionTypeId = Number(valuation.dLav) <= 35000 ? 2 : 1;
         }

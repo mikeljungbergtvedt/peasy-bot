@@ -43,6 +43,37 @@ function rpad(n) {
   return nf(n).padStart(10);
 }
 
+// Fossefallet slik det skrives til ERP: A-kjeden, deretter scenarioet som eier bilen.
+// Returnerer null hvis kortet ikke har et live fossefall (da vises gammel KALKYLE).
+function fossefallLines(ff, writeArm) {
+  if (!ff || !ff.a || !ff.tables_live) return null;
+  if (ff.pris_manuelt) return ['PRIS MANUELT' + (ff.grunn ? ' — ' + ff.grunn : '')];
+  const a = ff.a;
+  const minus = (v) => rpad(Math.abs(Number(v) || 0));
+  const arm = writeArm === 'O' ? 'ordna' : (writeArm === 'B' ? 'b' : 'a');
+  const navn = arm === 'ordna' ? 'Ordna' : arm.toUpperCase();
+  const s = ff[arm] || a;
+  const fee = a.peasy_avgift && a.peasy_avgift.lav != null ? a.peasy_avgift.lav : null;
+  const st = Number(a.statid) || 0;
+  const l = [
+    `Finn-utpris:  ${rpad(a.finn_utpris)} kr`,
+    `- Margin:     ${minus(a.forhandlermargin)} kr`,
+    `- Takst:      ${minus(a.avsetning_takst)} kr`,
+    ...(st ? [`${st < 0 ? '-' : '+'} Ståtid:     ${minus(st)} kr`] : []),
+    `- Omreg:      ${minus(a.omregistrering)} kr`,
+    `- Klargjøring:${minus(a.klargjoring)} kr`,
+    ...(a.salaer_ar ? [`- AR-salær:   ${minus(a.salaer_ar)} kr`] : []),
+    `= AR-bud:     ${rpad(a.ar_bud)} kr`,
+    ...(fee != null ? [`- Avgift:     ${minus(fee)} kr`] : []),
+    `= Peasy-bud A:${rpad(a.peasy_bud_mid)} kr` + ((fee != null && Number(a.ar_bud) - Math.abs(fee) < Number(a.peasy_bud_mid) - 500) ? '  (vrakpant-gulv)' : ''),
+  ];
+  if (arm === 'b') l.push(`B = A × 0,9:  ${rpad(s.peasy_bud_mid)} kr`);
+  if (arm === 'ordna') l.push(`Ordna = A × 0,75:${rpad(s.peasy_bud_mid)} kr`);
+  l.push(`Lav – høy ${navn}: ${nf(s.lav)} – ${nf(s.hoy)} kr`);
+  l.push(`Celle: ${ff.celleId || '?'}`);
+  return l;
+}
+
 function formatEvalCardHybrid(p, forErp = false) {
   const bil = p.bil || {};
   const veg = p.vegData || {};
@@ -241,7 +272,16 @@ function formatEvalCardHybrid(p, forErp = false) {
   out.push(forErp ? ('Car.info verdivurdering: ' + carInfoUrl2) : ('<a href="' + esc(carInfoUrl2) + '">Car.info verdivurdering</a>'));
   out.push('');
 
-  // ── 7. KALKYLE (Easy calcValuation — fasit som skrives til ERP) ─
+  // ── 7. FOSSEFALL (det som skrives til ERP). Gammel KALKYLE bare når fossefallet mangler. ─
+  const ffLines = fossefallLines(p.fossefall, p.writeArm);
+  if (ffLines) {
+    const armNavn = p.writeArm === 'O' ? 'Ordna' : (p.writeArm === 'B' ? 'B' : 'A');
+    out.push(B('FOSSEFALL (scenario ' + armNavn + ')'));
+    const body = ffLines.join('\n');
+    out.push(forErp ? body : `<pre>${esc(body)}</pre>`);
+    if (val.dLav != null && val.dLav <= 0) out.push('🚩 QA: D lav ≤ 0 — ugyldig, ikke send');
+    out.push('');
+  } else {
   const spreadStr = val.spreadPct != null ? `±${(val.spreadPct * 100).toFixed(1)}%` : '?';
   const kalkyleBody = [
     `Bracket: ${val.bracket || '?'}`,
@@ -267,6 +307,7 @@ function formatEvalCardHybrid(p, forErp = false) {
   out.push(B('KALKYLE'));
   out.push(forErp ? kalkyleBody : `<pre>${esc(kalkyleBody)}</pre>`);
   out.push('');
+  }
 
   // ── 8. Confidence + begrunnelse ──────────────────────────────
   out.push(B(`Confidence: ${anchor.confidence != null ? anchor.confidence : '?'}/100`));
@@ -344,4 +385,4 @@ function formatEvalCardHybrid(p, forErp = false) {
   return text;
 }
 
-module.exports = { formatEvalCardHybrid };
+module.exports = { formatEvalCardHybrid, fossefallLines };
