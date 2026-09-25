@@ -12,7 +12,7 @@ set -euo pipefail
 LIVE="${PEASY_HOME:-/Users/bot/peasy-auto}"
 SRC="${PEASY_DEPLOY_SRC:-/tmp/pb}"
 LABELS="${PEASY_DEPLOY_LABELS:-com.peasy.auto com.peasy.v3g}"
-TESTS="${PEASY_DEPLOY_TESTS:-fossefall.test.js takst-celler.test.js ab-kontroll.test.js}"
+TESTS="${PEASY_DEPLOY_TESTS:-fossefall.test.js takst-celler.test.js ab-kontroll.test.js publiser-maalinger.test.js}"
 LAUNCHCTL="${LAUNCHCTL:-launchctl}"
 
 BRANCH="${1:-}"

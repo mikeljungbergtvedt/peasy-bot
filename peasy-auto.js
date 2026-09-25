@@ -111,7 +111,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.163'; // scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.164'; // nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -3987,6 +3987,9 @@ async function refreshBracketsNightly() {
     // v20.163: lav i ERP mot fossefallet for bilens scenario (A/B/Ordna). E-post til Mike bare ved avvik.
     try { await require('./ab-kontroll.js').kjorABKontroll({ rows: all, log, logErr, sendVarsel: (emne, tekst) => sendMail(emne, tekst) }); }
     catch (eAb) { logErr('ab-kontroll', eAb); }
+    // v20.164: nye målinger fra A → v2-measurements.jsonl på Pages (bare tillegg). v2-boten gjorde dette før.
+    try { require('./publiser-maalinger.js').publiserMaalinger({ log }); }
+    catch (ePm) { logErr('publiser-maalinger', ePm); }
   } catch (err) {
     logErr('refreshBracketsNightly', err);
   }
