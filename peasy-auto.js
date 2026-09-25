@@ -111,7 +111,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.154'; // QA Sett Finn-pris går gjennom fossefallet (qa-anker-plan.js); locked midt A; B=A×0.9; Ordna=A×0.75
+const VERSION = 'v20.158'; // updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -4021,7 +4021,9 @@ async function pushEasyOverride(regnr, erpId, nyAnker, nyVal) {
 
 async function updateBracketsJson(rows) {
   try {
-    const GITHUB_TOKEN = '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';
+    // v20.158: token fra .env (var hardkodet og utløpt → «Bad credentials» hver natt siden 15.06).
+    const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+    if (!GITHUB_TOKEN) { log('Brackets: GITHUB_TOKEN mangler i .env — hopper over'); return; }
     const REPO = 'mikeljungbergtvedt/mikeljungbergtvedt.github.io';
     const FILE = 'peasy-brackets.json';
 
