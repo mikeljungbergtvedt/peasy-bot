@@ -12,7 +12,7 @@ const maalinger = [
   m('AA10000', '2026-09-25T08:00:00Z', 100000, 90000, 75000),                           // A-bil, riktig
   m('BB10001', '2026-09-25T08:00:00Z', 100000, 90000, 75000),                           // B-bil, riktig
   m('CC10003', '2026-09-25T08:00:00Z', 100000, 90000, 75000),                           // B-bil, ERP har A-tallet → avvik
-  m('OO10005', '2026-09-25T08:00:00Z', 200000, 180000, 150000),                         // Ordna, riktig
+  m('OO10005', '2026-09-25T08:00:00Z', 200000, 180000, 150000),                         // Ordna: endrer selv → sjekkes ikke
   m('QA10006', '2026-09-25T08:00:00Z', 80000, 72000, 60000),                            // QA satte ny Finn-pris senere:
   m('QA10006', '2026-09-25T09:00:00Z', 90000, 81000, 67500),                            //   siste måling er fasit
   m('LG10008', '2026-09-25T08:00:00Z', 50000, 45000, 37500, { tables_live: false, engine: 'hardcoded' }), // gammel motor → hoppes over
@@ -24,7 +24,7 @@ const rows = [
   rad(10000, 'AA10000', '100000-110000'),
   rad(10001, 'bb10001 ', '90050-99000'),        // 50 kr unna: innenfor toleransen
   rad(10003, 'CC10003', '100000-110000'),
-  rad(10005, 'OO10005', '150000-160000', 'ordna'),
+  rad(10005, 'OO10005', '250000-260000', 'ordna'),   // Ordna har endret: ikke avvik
   rad(10006, 'QA10006', '90000-99000'),
   rad(10008, 'LG10008', '1-2'),
   rad(10010, 'PM10010', '1-2'),
@@ -41,15 +41,15 @@ maalinger.push(m('UE30000', '2026-09-25T08:00:00Z', 60000, 54000, 45000));   // 
 rows.push(rad(30002, 'UE30000', '60000-66000'));    //   nyeste internnr sjekkes
 rows.push(rad(29990, 'UE30000', '99000-99000'));    //   eldre ignoreres
 const res = k.kontrollerAB({ rows, maalinger, fra });
-assert.strictEqual(res.sjekket, 7);
-assert.deepStrictEqual(res.per_scenario, { A: 4, B: 2, ORDNA: 1 });
+assert.strictEqual(res.sjekket, 6);
+assert.deepStrictEqual(res.per_scenario, { A: 4, B: 2 });
 assert.strictEqual(res.avvik.length, 1);
 assert.deepStrictEqual(
   { regnr: res.avvik[0].regnr, scenario: res.avvik[0].scenario, erp: res.avvik[0].erp, fossefall: res.avvik[0].fossefall, diff: res.avvik[0].diff },
   { regnr: 'CC10003', scenario: 'B', erp: 100000, fossefall: 90000, diff: 10000 });
 assert.deepStrictEqual(res.ikke_skrevet, ['NY10014']);
 const t = k.tekst(res, 24);
-assert.ok(/A 4, B 2, Ordna 1/.test(t));
+assert.ok(/A 4, B 2; Ordna sjekkes ikke/.test(t));
 assert.ok(/CC10003 \(10003\) B: ERP 100.000, fossefallet 90.000 \(\+10.000\)/.test(t), t);
 assert.ok(/0 med annen lav/.test(k.tekst(k.kontrollerAB({ rows: [], maalinger, fra }), 24)));
 
