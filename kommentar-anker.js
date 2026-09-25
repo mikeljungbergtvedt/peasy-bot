@@ -1,7 +1,8 @@
 'use strict';
 // kommentar-anker.js — Finn-pris/anker fra eval-kortet («BIL TIL ESTIMERING») i ERP-kommentaren.
 // For eldre biler med auksjonsbud som ikke har Finn-utpris i målingene.
-// Kortet har hatt «Anker: 123 000 kr» (vår 2026) og senere «Finn-pris: 123 000 kr».
+// Kortet har hatt flere format: «(Anker = snitt 4 valgte: 96 725 kr …)», «(anker 97k)»,
+// «Anker: 123 000 kr» og senere «Finn-pris: 123 000 kr». ERP svarer { data: { comments: [...] } }.
 //
 // Bare lesing: innlogging + GET /comments/all. Skriver aldri til ERP.
 // Hver bil hentes én gang og lagres i logs.nosync/kommentar-anker.json (også «ingen kort»).
@@ -24,14 +25,35 @@ function isoDato(v) {
   return m ? m[3] + '-' + m[2] + '-' + m[1] : '';
 }
 
-/** Finn-pris fra ett eval-kort. «(Anker = snitt …)»-linjen har ikke kolon og treffes ikke. */
+const KR = '([\\d\\s\\u00a0.]+?)\\s*kr';
+const MONSTRE = [
+  { felt: 'Finn-pris', re: new RegExp('(?:^|\\n)\\s*Finn-pris:\\s*' + KR) },
+  { felt: 'Anker', re: new RegExp('(?:^|\\n)\\s*Anker:\\s*' + KR) },
+  { felt: 'Anker snitt', re: new RegExp('\\(Anker = snitt \\d+ valgte:\\s*' + KR) },
+  { felt: 'anker k', re: /\(anker (\d+(?:[.,]\d+)?)k\)/i, tusen: true },
+];
+
+/** Finn-pris fra ett eval-kort. Første format som treffer (i rekkefølgen over) vinner. */
 function ankerFraKort(tekst) {
   const t = String(tekst || '').replace(/<[^>]+>/g, '');
   if (t.indexOf('BIL TIL ESTIMERING') < 0) return null;
-  const m = t.match(/(?:^|\n)\s*(Finn-pris|Anker):\s*([\d\s .]+?)\s*kr/);
-  if (!m) return null;
-  const n = Number(m[2].replace(/[\s .]/g, ''));
-  return Number.isFinite(n) && n > 0 ? { anker: n, felt: m[1] } : null;
+  for (const m of MONSTRE) {
+    const hit = t.match(m.re);
+    if (!hit) continue;
+    const n = m.tusen
+      ? Math.round(Number(hit[1].replace(',', '.')) * 1000)
+      : Number(hit[1].replace(/[\s\u00a0.]/g, ''));
+    if (Number.isFinite(n) && n > 0) return { anker: n, felt: m.felt };
+  }
+  return null;
+}
+
+/** ERP: { data: { comments: [...] } }. Tåler også en liste direkte. */
+function kommentarListe(svar) {
+  const d = svar && svar.data;
+  if (Array.isArray(d)) return d;
+  if (d && Array.isArray(d.comments)) return d.comments;
+  return [];
 }
 
 /** Siste eval-kort med tall vinner. */
@@ -100,7 +122,7 @@ async function oppdaterKommentarAnker({ rows, hopp, getToken, maks = 400, pauseM
     if (res.status === 401 || res.status === 403) { L('kommentar-anker: ERP sier nei (' + res.status + ') — stopper'); break; }
     if (!res.ok) { await new Promise((r) => setTimeout(r, pauseMs)); continue; }
     const d = await res.json().catch(() => null);
-    const a = ankerFraKommentarer(d && d.data);
+    const a = ankerFraKommentarer(kommentarListe(d));
     cache[k.reg] = a ? Object.assign({ internnr: k.inr }, a) : { internnr: k.inr, ingen: true };
     hentet++;
     if (a) funnet++;
@@ -111,4 +133,4 @@ async function oppdaterKommentarAnker({ rows, hopp, getToken, maks = 400, pauseM
   return { hentet, funnet, igjen: Math.max(0, kandidater.length - hentet) };
 }
 
-module.exports = { ankerFraKort, ankerFraKommentarer, oppdaterKommentarAnker, lesCache, FIL };
+module.exports = { ankerFraKort, ankerFraKommentarer, kommentarListe, oppdaterKommentarAnker, lesCache, FIL };

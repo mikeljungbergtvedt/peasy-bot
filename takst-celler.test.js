@@ -143,12 +143,20 @@ assert.ok(!JSON.stringify(d).includes('AA11111'));
 // Uten satser: kaster (nattjobben fanger det)
 assert.throws(() => tc.byggTakstCeller({ rows, kilder, satser: null }));
 
-// Kommentar-parser: «Anker:» (vår) og «Finn-pris:» (senere). «(Anker = snitt …)» teller ikke.
+// Kommentar-parser: Finn-pris > Anker: > (Anker = snitt …) > (anker 97k).
 const ka = require('./kommentar-anker');
 assert.deepStrictEqual(ka.ankerFraKort('PEASY BIL TIL ESTIMERING\nKALKYLE\n   Anker:   123 000 kr\n'), { anker: 123000, felt: 'Anker' });
 assert.deepStrictEqual(ka.ankerFraKort('PEASY BIL TIL ESTIMERING\n   (Anker = snitt 5 valgte: 99 000 kr | snitt 80 000 km)\nKALKYLE\n   Finn-pris:       87\u00a0500 kr\n'), { anker: 87500, felt: 'Finn-pris' });
 assert.strictEqual(ka.ankerFraKort('Kunden ringte. Anker: 50 000 kr'), null, 'bare eval-kort');
-assert.strictEqual(ka.ankerFraKort('<b>DRIVE BIL TIL ESTIMERING</b>\n(Anker = snitt 5 valgte: 99 000 kr)'), null);
+assert.deepStrictEqual(ka.ankerFraKort('<b>DRIVE BIL TIL ESTIMERING</b>\n(Anker = snitt 5 valgte: 99 000 kr)'), { anker: 99000, felt: 'Anker snitt' });
+// Ekte kort fra mai 2026 (LY74673)
+assert.deepStrictEqual(ka.ankerFraKort('PEASY BIL TIL ESTIMERING\nLY74673 | CITROEN C4 AIRCROSS 1.6 M\nPrisklasse: Lav (anker 97k)\n   (Anker = snitt 4 valgte: 96 725 kr | snitt 132 775 km)'), { anker: 96725, felt: 'Anker snitt' });
+assert.deepStrictEqual(ka.ankerFraKort('PEASY BIL TIL ESTIMERING\nPrisklasse: Mid (anker 142,5k)'), { anker: 142500, felt: 'anker k' });
+assert.strictEqual(ka.ankerFraKort('DRIVE BIL TIL ESTIMERING\nNF78119 | PORSCHE Panamera PDK 2013'), null);
+// ERP-svaret: { data: { comments: [...] } }
+assert.strictEqual(ka.kommentarListe({ success: true, data: { comments: [{ id: 1 }] } }).length, 1);
+assert.strictEqual(ka.kommentarListe({ data: [{ id: 1 }, { id: 2 }] }).length, 2);
+assert.strictEqual(ka.kommentarListe({ data: {} }).length, 0);
 const siste = ka.ankerFraKommentarer([
   { created_at: '2026-05-02T10:00:00Z', comment: 'PEASY BIL TIL ESTIMERING\n   Anker:   150 000 kr' },
   { created_at: '2026-05-01T10:00:00Z', comment: 'PEASY BIL TIL ESTIMERING\n   Anker:   140 000 kr' },
@@ -169,7 +177,7 @@ assert.strictEqual(ka.ankerFraKommentarer([]), null);
     kall.push({ url, metode: (opt && opt.method) || 'GET' });
     const inr = url.match(/driveno\/(\d+)\/comments/)[1];
     const data = inr === '51' ? [{ created_at: '2026-04-20T09:00:00Z', comment: 'PEASY BIL TIL ESTIMERING\n   Anker:   64 000 kr' }] : [{ comment: 'hei' }];
-    return { ok: true, status: 200, json: async () => ({ success: true, data }) };
+    return { ok: true, status: 200, json: async () => ({ success: true, data: { comments: data } }) };
   };
   try {
     const rr = [
