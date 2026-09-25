@@ -111,7 +111,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.158'; // updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.159'; // takst-celler: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -3979,6 +3979,9 @@ async function refreshBracketsNightly() {
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
     const all = rows.slice(1).filter(r => r[1]);
     await updateBracketsJson(all);
+    // v20.159: takst-celler fra faktiske AR-bud → peasy-cells.json (heatmap i Pulse). Kaster aldri.
+    try { await require('./takst-celler.js').oppdaterTakstCeller({ rows: all, log, logErr }); }
+    catch (eTc) { logErr('takst-celler', eTc); }
   } catch (err) {
     logErr('refreshBracketsNightly', err);
   }
