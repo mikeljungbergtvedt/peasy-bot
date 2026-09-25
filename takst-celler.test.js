@@ -22,7 +22,7 @@ const satser = {
 function rad(o) {
   const r = new Array(32).fill(null);
   r[0] = o.inr; r[1] = o.reg; r[3] = o.est || null; r[4] = o.pb != null ? o.pb : null; r[8] = o.aar || 2016;
-  r[11] = o.kilde || 'peasy'; r[12] = o.status || 'sold_and_paid'; r[19] = o.bud; r[21] = o.retur || null; r[22] = o.km;
+  r[11] = o.kilde || 'peasy'; r[12] = o.status || 'sold_and_paid'; r[13] = o.reg_dato || '20.09.2026'; r[19] = o.bud; r[21] = o.retur || null; r[22] = o.km;
   return r;
 }
 
@@ -46,13 +46,12 @@ const kilder = [
     { regnr: 'AA11111', timestamp: '2026-09-25T10:00:00Z', finn_utpris: 70000 }, // Easy slår V3G for A/B-bil
     { regnr: 'OO99999', timestamp: '2026-09-22T10:00:00Z', finn_utpris: 80000 },
   ] },
-  { navn: 'easy2', linjer: [] },
-  { navn: 'loop2', linjer: [
-    { regnr: 'BB22222', timestamp: '2026-09-01T10:00:00Z', evaluator: 'claude', ok: true, finn_utpris: 100000 },
-    { regnr: 'BB22222', timestamp: '2026-09-01T10:00:01Z', evaluator: 'grok', ok: true, finn_utpris: 110000 },
-    { regnr: 'BB22222', timestamp: '2026-09-01T10:00:02Z', evaluator: 'gemini', ok: true, finn_utpris: 999999 },
+  { navn: 'kommentar', linjer: [
+    { regnr: 'KK66666', anker: 70000, felt: 'Anker', dato: '2026-04-20' },
+    { regnr: 'KK77777', ingen: true },
   ] },
 ];
+kilder[1].linjer.push({ regnr: 'BB22222', timestamp: '2026-09-01T10:00:00Z', finn_utpris: 105000 });
 // Ordna-bil: V3G først selv om Easy har nyere måling
 kilder[0].linjer.push({ regnr: 'OO99999', timestamp: '2026-09-23T10:00:00Z', fossefall: { a: { finn_utpris: 99000, omregistrering: -4532, statid: 0 } } });
 
@@ -63,6 +62,9 @@ const rows = [
   rad({ inr: 4, reg: 'DD44444', bud: 20000, km: 150000, est: '80000-88000', pb: 10100 }), // råtten: −87 % mot lav
   rad({ inr: 5, reg: 'OO99999', bud: 50000, km: 60000, kilde: 'ordna', retur: '01.10.2026' }),
   rad({ inr: 6, reg: 'EE55555', bud: null, km: 60000 }),                          // ikke på auksjon
+  rad({ inr: 7, reg: 'KK66666', bud: 40000, km: 150000, est: '20000-26000', pb: 3000 }), // eldre, ville vært «råtten»
+  rad({ inr: 8, reg: 'KK77777', bud: 40000, km: 150000 }),                        // ingen Finn-pris noe sted
+  rad({ inr: 9, reg: 'AA11111', bud: 40000, km: 150000, reg_dato: '15.10.2025' }), // før 01.11.2025
 ];
 
 const d = tc.byggTakstCeller({ rows, kilder, satser, naa: new Date('2026-09-25T21:30:00Z') });
@@ -75,16 +77,31 @@ assert.strictEqual(aa.salaer, 2200);
 assert.strictEqual(aa.paakost, 19268);
 assert.strictEqual(aa.raatten, false);
 
-// BB22222: loop2 = snitt av Claude og Grok (105 000), Gemini teller ikke. 100-150|120-200, margin 12 500.
+// BB22222: V3G 105 000. 100-150|120-200, margin 12 500.
 // salær 2,7 % av 80 000 = 2 160 → min 2 200. 105 000 − 80 000 − 12 500 − 4 532 − 1 000 − 2 200 = 4 768
 const bb = d.biler.find((b) => b.internnr === '2');
 assert.strictEqual(bb.finn, 105000);
 assert.strictEqual(bb.celle, '100-150|120-200');
 assert.strictEqual(bb.paakost, 4768);
 
-// CC33333 har bare gammelt anker
-assert.ok(!d.biler.find((b) => b.internnr === '3'));
+// CC33333 har bare gammelt anker: i heatmapet, ikke i medianen
+const cc = d.biler.find((b) => b.internnr === '3');
+assert.strictEqual(cc.gammel, true);
+assert.strictEqual(cc.kilde, 'anker');
+assert.strictEqual(cc.celle, '100-150|50-120');
+assert.strictEqual(d.celler['100-150|50-120'].n_bud, 1);
+assert.strictEqual(d.celler['100-150|50-120'].n_gammel, 1);
+assert.strictEqual(d.celler['100-150|50-120'].n, 0);
+assert.strictEqual(d.celler['100-150|50-120'].median_paakost, null);
+// KK66666: Finn-pris fra ERP-kommentaren, også bare heatmap. KK77777 hadde ikke kort.
+const kk = d.biler.find((b) => b.internnr === '7');
+assert.strictEqual(kk.kilde, 'kommentar');
+assert.strictEqual(kk.gammel, true);
+assert.strictEqual(kk.raatten, false, 'eldre biler merkes ikke råtne');
+assert.strictEqual(d.totalt.gammel, 2);
 assert.strictEqual(d.totalt.uten_finn, 1);
+// Registrert før 01.11.2025 → ikke med
+assert.ok(!d.biler.find((b) => b.internnr === '9'));
 
 // DD44444: råtten, telles i n_bud men ikke i medianen. Ståtid −3 000 trekkes med.
 const dd = d.biler.find((b) => b.internnr === '4');
@@ -104,7 +121,7 @@ assert.strictEqual(oo.retur, true);
 assert.strictEqual(d.celler['60-100|50-120'].n_retur, 1);
 
 // Ikke på auksjon → ikke med
-assert.strictEqual(d.totalt.med_bud, 5);
+assert.strictEqual(d.totalt.med_bud, 7);
 assert.ok(!d.biler.find((b) => b.internnr === '6'));
 
 // Forslag først ved 20 bud i cellen
@@ -126,4 +143,56 @@ assert.ok(!JSON.stringify(d).includes('AA11111'));
 // Uten satser: kaster (nattjobben fanger det)
 assert.throws(() => tc.byggTakstCeller({ rows, kilder, satser: null }));
 
-console.log('takst-celler.test.js OK');
+// Kommentar-parser: «Anker:» (vår) og «Finn-pris:» (senere). «(Anker = snitt …)» teller ikke.
+const ka = require('./kommentar-anker');
+assert.deepStrictEqual(ka.ankerFraKort('PEASY BIL TIL ESTIMERING\nKALKYLE\n   Anker:   123 000 kr\n'), { anker: 123000, felt: 'Anker' });
+assert.deepStrictEqual(ka.ankerFraKort('PEASY BIL TIL ESTIMERING\n   (Anker = snitt 5 valgte: 99 000 kr | snitt 80 000 km)\nKALKYLE\n   Finn-pris:       87\u00a0500 kr\n'), { anker: 87500, felt: 'Finn-pris' });
+assert.strictEqual(ka.ankerFraKort('Kunden ringte. Anker: 50 000 kr'), null, 'bare eval-kort');
+assert.strictEqual(ka.ankerFraKort('<b>DRIVE BIL TIL ESTIMERING</b>\n(Anker = snitt 5 valgte: 99 000 kr)'), null);
+const siste = ka.ankerFraKommentarer([
+  { created_at: '2026-05-02T10:00:00Z', comment: 'PEASY BIL TIL ESTIMERING\n   Anker:   150 000 kr' },
+  { created_at: '2026-05-01T10:00:00Z', comment: 'PEASY BIL TIL ESTIMERING\n   Anker:   140 000 kr' },
+  { created_at: '2026-05-03T10:00:00Z', comment: 'Takst ferdig' },
+]);
+assert.strictEqual(siste.anker, 150000);
+assert.strictEqual(siste.dato, '2026-05-02');
+assert.strictEqual(ka.ankerFraKommentarer([]), null);
+
+// Henting: bare GET mot comments/all, hopper over biler i målingene og i cachen, lagrer også «ingen kort».
+(async () => {
+  const os = require('os'), fs = require('fs'), path = require('path');
+  const fil = path.join(os.tmpdir(), 'kommentar-anker-test.json');
+  fs.writeFileSync(fil, JSON.stringify({ CACHED1: { internnr: '50', anker: 1000 } }));
+  const kall = [];
+  const ekteFetch = global.fetch;
+  global.fetch = async (url, opt) => {
+    kall.push({ url, metode: (opt && opt.method) || 'GET' });
+    const inr = url.match(/driveno\/(\d+)\/comments/)[1];
+    const data = inr === '51' ? [{ created_at: '2026-04-20T09:00:00Z', comment: 'PEASY BIL TIL ESTIMERING\n   Anker:   64 000 kr' }] : [{ comment: 'hei' }];
+    return { ok: true, status: 200, json: async () => ({ success: true, data }) };
+  };
+  try {
+    const rr = [
+      rad({ inr: 50, reg: 'CACHED1', bud: 1 }),
+      rad({ inr: 51, reg: 'NY11111', bud: 1 }),
+      rad({ inr: 52, reg: 'NY22222', bud: 1 }),
+      rad({ inr: 53, reg: 'MAALT11', bud: 1 }),
+      rad({ inr: 54, reg: 'GML1111', bud: 1, reg_dato: '01.10.2025' }),
+      rad({ inr: 55, reg: 'UTENBUD', bud: null }),
+    ];
+    const r = await ka.oppdaterKommentarAnker({ rows: rr, hopp: (reg) => reg === 'MAALT11', getToken: async () => 'tok', pauseMs: 0, fil, log: () => {} });
+    assert.deepStrictEqual(r, { hentet: 2, funnet: 1, igjen: 0 });
+    assert.ok(kall.every((k) => k.metode === 'GET' && /\/comments\/all$/.test(k.url)), 'bare GET');
+    assert.deepStrictEqual(kall.map((k) => k.url.match(/driveno\/(\d+)/)[1]), ['51', '52']);
+    const c = JSON.parse(fs.readFileSync(fil, 'utf8'));
+    assert.strictEqual(c.NY11111.anker, 64000);
+    assert.strictEqual(c.NY22222.ingen, true);
+    assert.strictEqual(c.CACHED1.anker, 1000);
+    const r2 = await ka.oppdaterKommentarAnker({ rows: rr, hopp: (reg) => reg === 'MAALT11', getToken: async () => 'tok', pauseMs: 0, fil, log: () => {} });
+    assert.strictEqual(r2.hentet, 0, 'andre kjøring henter ingenting');
+  } finally {
+    global.fetch = ekteFetch;
+    try { fs.unlinkSync(fil); } catch (_) {}
+  }
+  console.log('takst-celler.test.js OK');
+})().catch((e) => { console.error(e); process.exit(1); });
