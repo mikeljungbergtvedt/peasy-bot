@@ -12,7 +12,7 @@ set -euo pipefail
 LIVE="${PEASY_HOME:-/Users/bot/peasy-auto}"
 SRC="${PEASY_DEPLOY_SRC:-/tmp/pb}"
 LABELS="${PEASY_DEPLOY_LABELS:-com.peasy.auto}"  # v3g stoppet 28.09 (fossefallet er eneste motor)
-TESTS="${PEASY_DEPLOY_TESTS:-fossefall.test.js takst-celler.test.js ab-kontroll.test.js publiser-maalinger.test.js eval-card-hybrid.test.js statid-forslag.test.js skriving.test.js}"
+TESTS="${PEASY_DEPLOY_TESTS:-fossefall.test.js takst-celler.test.js ab-kontroll.test.js publiser-maalinger.test.js eval-card-hybrid.test.js statid-forslag.test.js skriving.test.js finn-utpris-felt.test.js}"
 LAUNCHCTL="${LAUNCHCTL:-launchctl}"
 
 BRANCH="${1:-}"

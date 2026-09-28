@@ -113,7 +113,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.169'; // v20.169: Finn-comps over 2 mill. tas med. v20.168:A skriver alle scenarioer (V3G skriver ikke ERP), ingen gammel kalkyle ved PRIS MANUELT, Endre anker via fossefallet, egenvekt fra carinfo; v20.167: avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.171'; // v20.171: Finn-utpris til ERP-feltet finn_asking_price (PS-162), flagg FINN_FELT_SKRIV (0/dry/1, standard 0); el/hybrid: tvillinger på rekkevidde, aldri hk/kW. v20.170: QA-kort = ERP-kort, V3G av, auto-send. v20.169: Finn-comps over 2 mill. tas med. v20.168:A skriver alle scenarioer (V3G skriver ikke ERP), ingen gammel kalkyle ved PRIS MANUELT, Endre anker via fossefallet, egenvekt fra carinfo; v20.167: avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -2965,6 +2965,8 @@ async function evalCar(bil, page, cache, opts = {}) {
             karosseri: (vegData && vegData.karosseri) || '',
             drive: (vegData && vegData.drive) || '',
             gir: (vegData && vegData.gearbox) || '',
+            // v20.171: el/hybrid matches på rekkevidde, ikke hk (elbilradar, ellers Vegvesen WLTP)
+            range: parseInt(String(bil.elbRekkevidde || '').replace(/[^0-9]/g, ''), 10) || (vegData && vegData.range) || null,
           }),
         });
         stripped = {
@@ -3393,6 +3395,22 @@ async function evalCar(bil, page, cache, opts = {}) {
     };
     const erpText = formatEvalCardHybrid(cardParams, true);
     const chatPosted = await maybePostToChat(bil, erpId, erpText, token);
+    // v20.171 PS-162: Finn-utpris til ERP-feltet finn_asking_price — samme tall som under FINN-UTPRIS i kommentaren,
+    // fra armen som ga kunden estimatet. Bare når estimatet er skrevet til ERP. Frittstående kall, flagg FINN_FELT_SKRIV
+    // (0 av, dry logg, 1 skriv). Feil logges og stopper aldri prisingen, kommentaren eller E05.
+    if (erpWritten) {
+      try {
+        const _ffelt = require('./finn-utpris-felt');
+        const _fuRec = (v2 && v2.finn_utpris) || {};
+        await _ffelt.skrivFinnUtpris(erpId, _ffelt.velgFinnUtpris({
+          kommentar: _ffelt.kommentarFinnUtpris(cardParams),
+          card: _ffCard, arm: _writeArm,
+          kilde: _fuRec.kilde, grunn: _fuRec.finn_utpris_grunn || _fuRec.grunn,
+          kunKundensAnnonse: !!bil._kunKundensAnnonse,
+          antallComps: (v2 && v2.anchor && Array.isArray(v2.anchor.valgte_comps)) ? v2.anchor.valgte_comps.length : null,
+        }), { log });
+      } catch (eFfelt) { logErr('finn-felt', eFfelt); }
+    }
 
     // 10. Send Telegram
     _evalRegnrMap[erpId] = regnr;
@@ -3778,6 +3796,8 @@ async function pollTelegramCommands(cache) {
             const tok = await getErpToken();
             await writeToERP(aId, nyVal.dLav, nyVal.dHoy, nyVal.auctionTypeId, d.anyDebts, d.brreg, tok, nyAnker);
             try { await pushEasyOverride(aRegnr, aId, nyAnker, nyVal); } catch (eOv) { logErr('pushEasyOverride', eOv); }
+            // v20.171 PS-162: ny Finn-utpris → feltet følger (flagg FINN_FELT_SKRIV).
+            try { const _ffelt = require('./finn-utpris-felt'); await _ffelt.skrivFinnUtpris(aId, _ffelt.velgFinnUtpris({ kommentar: nyAnker, card: plan.card, arm: plan.arm }), { log }); } catch (eFfelt) { logErr('finn-felt endre-anker', eFfelt); }
             const kalkyle = fossefallCard.formatFossefallBlock(plan.card) + '\nSkrevet (' + (plan.arm === 'O' ? 'Ordna' : plan.arm) + '): ' + nyVal.dLav + ' – ' + nyVal.dHoy;
             const nowStr = new Date().toLocaleString('nb-NO', { timeZone: 'Europe/Oslo' });
             const fullKortTekst = `🔄 ENDRE ANKER ${aRegnr} — ${nowStr}\n\n${kalkyle}`;
@@ -4317,6 +4337,8 @@ async function main() {
       try { addToCache(cache, erpId); } catch (eCch) { logErr('qa-anker cache', eCch); }
       try { if (typeof _bilCache !== 'undefined' && _bilCache) _bilCache.delete(regnr); } catch (_) {}
       try { await pushEasyOverride(regnr, erpId, anker, nyVal); } catch (eOv) { logErr('qa-anker override', eOv); }
+      // v20.171 PS-162: QA satte ny Finn-utpris → feltet følger (flagg FINN_FELT_SKRIV).
+      try { const _ffelt = require('./finn-utpris-felt'); await _ffelt.skrivFinnUtpris(erpId, _ffelt.velgFinnUtpris({ kommentar: anker, card: plan.card, arm: plan.arm }), { log }); } catch (eFfelt) { logErr('finn-felt qa-anker', eFfelt); }
       try {
         await maybePostToChat(target, erpId, 'ENDRE ANKER FRA QA ' + regnr + '\nANKER ' + anker + (plan.statidKr ? '\nSTÅTID ' + plan.statidKr + ' (godkjent i QA, kilde carinfo)' : '') + '\nD lav ' + nyVal.dLav + '\nD høy ' + nyVal.dHoy, tok);
       } catch (eC) { logErr('qa-anker kort', eC); }
