@@ -112,7 +112,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.168'; // A skriver alle scenarioer (V3G skriver ikke ERP), ingen gammel kalkyle ved PRIS MANUELT, Endre anker via fossefallet, egenvekt fra carinfo; v20.167: avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.169'; // v20.169: Finn-comps over 2 mill. tas med. v20.168:A skriver alle scenarioer (V3G skriver ikke ERP), ingen gammel kalkyle ved PRIS MANUELT, Endre anker via fossefallet, egenvekt fra carinfo; v20.167: avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -1292,7 +1292,7 @@ async function scrapeFinnUrl(url, page) {
       const heading = (a.querySelector('h2')?.textContent || a.querySelector('[class*="heading"]')?.textContent || text.split('\n')[0] || '').trim();
       const sold = /\bsolgt\b/i.test(text) && !/til salgs/i.test((heading + ' ' + text.slice(0, 80)));
       return { price, km, year, link, heading, sold };
-    }).filter(c => c.price >= 5000 && c.price <= 2000000);
+    }).filter(c => c.price >= 5000 && c.price <= 30000000); // v20.169: ingen 2 mill.-grense, hele bilflåten
   });
 
   const seen = new Set();
