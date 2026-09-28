@@ -203,29 +203,25 @@ function planErpWrite(opts) {
       dHoy: null,
     };
   }
-  if (arm === 'B' || arm === 'O') {
-    return {
-      arm: arm,
-      writeErp: false,
-      publishCard: publishCard,
-      reason: arm === 'B' ? 'ERP: skrives av B' : 'ERP: skrives av Ordna',
-      dLav: chosen && chosen.lav != null ? chosen.lav : null,
-      dHoy: chosen && chosen.hoy != null ? chosen.hoy : null,
-    };
-  }
+  // v20.167: A skriver alle scenarioene fra det felles fossefallet (B = A × 0,9, Ordna = A × 0,75).
   if (card && card.tables_live) {
-    const aLav = chosen && chosen.lav != null ? Number(chosen.lav) : Number(card.a && card.a.lav);
-    const aHoy = chosen && chosen.hoy != null ? Number(chosen.hoy) : Number(card.a && card.a.hoy);
-    if (Number.isFinite(aLav) && Number.isFinite(aHoy)) {
+    const lav = chosen && chosen.lav != null ? Number(chosen.lav) : NaN;
+    const hoy = chosen && chosen.hoy != null ? Number(chosen.hoy) : NaN;
+    if (Number.isFinite(lav) && Number.isFinite(hoy)) {
       return {
-        arm: 'A',
+        arm: arm,
         writeErp: true,
         publishCard: publishCard,
-        reason: 'ERP: skrives av A',
-        dLav: aLav,
-        dHoy: aHoy,
+        reason: 'ERP: fossefall ' + (arm === 'O' ? 'Ordna' : arm),
+        dLav: lav,
+        dHoy: hoy,
       };
     }
+    return { arm: arm, writeErp: false, publishCard: publishCard, reason: 'fossefallet mangler lav/høy for ' + arm, dLav: null, dHoy: null };
+  }
+  // Uten live fossefall: gammel A-kalkyle bare for A. B/Ordna skal aldri få A-tall.
+  if (arm === 'B' || arm === 'O') {
+    return { arm: arm, writeErp: false, publishCard: publishCard, reason: 'fossefall mangler', dLav: null, dHoy: null };
   }
   const legacyLav = Number(opts.legacyLav);
   const legacyHoy = Number(opts.legacyHoy);

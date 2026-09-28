@@ -23,8 +23,8 @@ function appendEasyMeasurement({ regnr, km, erpId, source, origin_cv, easyEval, 
         || (origin_cv.ident && origin_cv.ident.year)
         || (origin_cv.carinfo && (origin_cv.carinfo.model_year || origin_cv.carinfo.year))))
         || (easyEval && (easyEval.model_year || easyEval.year)) || null;
-      const egenvekt = (origin_cv && (origin_cv.egenvekt || origin_cv.weight))
-        || (easyEval && easyEval.egenvekt) || null;
+      // v20.168: carinfo-egenvekt som i peasy-auto, så målingen regner samme omreg som ERP fikk.
+      const egenvekt = require('./egenvekt').egenvekt((easyEval && easyEval.egenvekt), origin_cv) || null;
       const hintsA = {
         anker_lagret: finn,
         km_override: !!(easyEval && easyEval.km_override) || !!(easyObj.km_override),

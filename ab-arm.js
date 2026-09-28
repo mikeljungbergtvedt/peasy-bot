@@ -1,5 +1,7 @@
 // A/B-lodd for live eval.
-// Partall internnr = A Easy. Oddetall = B V3G.
+// Partall internnr = A, oddetall = B, kilde ordna = Ordna.
+// v20.168: A (peasy-auto) skriver ALLE scenarioene til ERP fra det felles fossefallet
+// (B = A × 0,9, Ordna = A × 0,75). V3G skriver ikke lenger til ERP — den overskrev med egen Finn-utpris.
 // Låst av erpId — re-pris bytter ikke arm.
 // Ordna (ERP source=ordna) står utenfor loddet: V3G eier skriv + egen kalkyle.
 
@@ -32,14 +34,11 @@ function armLabel(erpId, source) {
 }
 
 function easyShouldSkipWrite(erpId, source) {
-  if (isOrdnaSource(source)) return 'ordna';
-  if (isArmB(erpId)) return 'arm-B';
-  return null;
+  return null; // v20.168: A skriver alle scenarioer
 }
 
 function v3gShouldWrite(erpId, source) {
-  if (isOrdnaSource(source)) return true;
-  return isArmB(erpId);
+  return false; // v20.168: V3G skriver aldri til ERP
 }
 
 function isPositiveKr(n) {

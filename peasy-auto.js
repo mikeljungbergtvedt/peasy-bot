@@ -112,7 +112,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.167'; // avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.168'; // A skriver alle scenarioer (V3G skriver ikke ERP), ingen gammel kalkyle ved PRIS MANUELT, Endre anker via fossefallet, egenvekt fra carinfo; v20.167: avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -3256,8 +3256,11 @@ async function evalCar(bil, page, cache, opts = {}) {
       try { token = await getErpToken(); } catch (eTok) { logErr('getErpToken', eTok); }
     }
 
+    // v20.168: egenvekt fra carinfo når elbil.no ikke har den (før: 1 500 kg-reserve for alle andre biler).
+    try { bil.egenvekt = require('./egenvekt').egenvekt(bil.egenvekt, originCV) || null; } catch (_) {}
     // 8. Fossefall først (locked scale), så ERP-lav = writing arm's fossefall lav.
     let _ffCard = null;
+    let _ffPlan = null;
     let _writeArm = 'A';
     let _fuAvvik = null;
     try {
@@ -3307,7 +3310,7 @@ async function evalCar(bil, page, cache, opts = {}) {
         })(),
       });
       _ffCard = fossefallCard.cardFromBuilt(_built) || _built;
-      const plan = fossefallCard.planErpWrite({
+      const plan = _ffPlan = fossefallCard.planErpWrite({
         erpId: erpId,
         source: bil && bil.source,
         card: _ffCard,
@@ -3328,7 +3331,12 @@ async function evalCar(bil, page, cache, opts = {}) {
     await _maybeVrakpant(valuation);
     try { await _maybeKmVarsel(_detectKmSvindel(bil.mileage, (bil.carInfo && bil.carInfo.history) || [])); } catch(e) {}
     if (await _maybeBlock({ regnr: regnr, internnr: erpId, sdComment: sdComment, oppgittKm: bil.mileage, history: (bil.carInfo && bil.carInfo.history) || [], valgteComps: (v2 && v2.anchor && v2.anchor.valgte_comps) || [], segConfidence: seg && seg.confidence, dLav: valuation.dLav, dHoy: valuation.dHoy })) return;
-    const erpWrite = await maybeWriteToERP(bil, erpId, valuation.dLav, valuation.dHoy, valuation.auctionTypeId, brreg.anyDebts, brreg, token, anchor.price);
+    // v20.168: live fossefall uten lav/høy for bilens scenario (PRIS MANUELT) → aldri gammel kalkyle til ERP.
+    const _ffStopp = !!(_ffCard && _ffCard.tables_live && _ffPlan && !_ffPlan.writeErp);
+    if (_ffStopp) log(`Fossefall ${regnr}: ${_ffPlan.reason} — skriver ikke ERP`);
+    const erpWrite = _ffStopp
+      ? { written: false, skipBy: null, ffStopp: true }
+      : await maybeWriteToERP(bil, erpId, valuation.dLav, valuation.dHoy, valuation.auctionTypeId, brreg.anyDebts, brreg, token, anchor.price);
     const erpWritten = !!(erpWrite && erpWrite.written);
     const erpSkipBy = (erpWrite && erpWrite.skipBy) || null;
 
@@ -3422,7 +3430,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           mileage: bil.mileage, model_series: bil.model_series,
           make: vegData ? vegData.make : (bil.make || ''),
           origin_cv: originCV || null,
-          easy_eval: Object.assign({ anker: (anchor && Number.isFinite(Number(anchor.price))) ? Number(anchor.price) : null, dLav: (valuation && Number.isFinite(Number(valuation.dLav))) ? Number(valuation.dLav) : null, dHoy: (valuation && Number.isFinite(Number(valuation.dHoy))) ? Number(valuation.dHoy) : null, bracket: (valuation && valuation.bracket) || null, model: (valuation && valuation.model) || null, vrakpant: !!(valuation && valuation.vrakpant), breakdown: (valuation && valuation.breakdown) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride, kjorbar: kjorbarInfo.kjorbar, wrecker: !!kjorbarInfo.wrecker, finn_link: (finnSelf && finnSelf.link) || null, finn_price: (finnSelf && Number(finnSelf.price)) || null, finn_sold: (finnSelf && finnSelf.sold) || null, finn_source: (finnSelf && finnSelf.source) || null, finn_utpris: (v2 && v2.finn_utpris && v2.finn_utpris.finn_utpris != null) ? v2.finn_utpris.finn_utpris : ((anchor && Number.isFinite(Number(anchor.price))) ? Number(anchor.price) : null), origin_cap: (v2 && v2.finn_utpris && v2.finn_utpris.origin_cap != null) ? v2.finn_utpris.origin_cap : null, finn_utpris_grunn: (v2 && v2.finn_utpris && (v2.finn_utpris.finn_utpris_grunn || (v2.finn_utpris.kilde === 'kun_kundens_annonse' || v2.finn_utpris.grunn === 'kun_kundens_annonse' ? 'kun kundens annonse' : v2.finn_utpris.grunn))) || null, annonsepris: (v2 && v2.finn_utpris && v2.finn_utpris.annonsepris != null) ? v2.finn_utpris.annonsepris : ((finnSelf && Number(finnSelf.price)) || null), always_qa: !!(v2 && v2.finn_utpris && v2.finn_utpris.always_qa), low_confidence: !!(v2 && v2.finn_utpris && v2.finn_utpris.low_confidence) || easyConfidence === 'lav', valgte_comps: (v2 && v2.finn_utpris && v2.finn_utpris.valgte_comps) || (v2 && v2.anchor && v2.anchor.valgte_comps) || [], ekskluderte: (v2 && v2.finn_utpris && v2.finn_utpris.ekskluderte) || [] }, (function(){ var own = (v2 && v2.finn_utpris && v2.finn_utpris.valgte_comps) || (v2 && v2.anchor && v2.anchor.valgte_comps) || []; var sc = scoreEasyIdentComps(vegData, bil, finnSelf, own, (collected && collected.comps) || own); if (sc) log('ident/comps ' + regnr + ' ident=' + sc.ident + ' comps=' + sc.comps + ' n=' + sc.n + ' match=' + sc.nMatch); return sc ? { ident_score: sc.ident, comps_score: sc.comps, combined_score: sc.combined, comps_count: sc.n, ident_label: (v2 && v2.finn_utpris && v2.finn_utpris.ident_label) || ((vegData && vegData.make || '') + ' ' + ((vegData && vegData.model) || (bil && bil.model_series) || '')).trim(), n_rejected: (v2 && v2.finn_utpris && v2.finn_utpris.n_rejected) || 0, comps_n_sold: (v2 && v2.finn_utpris && v2.finn_utpris.n_sold) || 0, comps_n_ask: (v2 && v2.finn_utpris && v2.finn_utpris.n_ask) || 0, chefs: (v2 && v2.finn_utpris && v2.finn_utpris.chefs) || null } : {}; })())
+          easy_eval: Object.assign({ egenvekt: bil.egenvekt || null, anker: (anchor && Number.isFinite(Number(anchor.price))) ? Number(anchor.price) : null, dLav: (valuation && Number.isFinite(Number(valuation.dLav))) ? Number(valuation.dLav) : null, dHoy: (valuation && Number.isFinite(Number(valuation.dHoy))) ? Number(valuation.dHoy) : null, bracket: (valuation && valuation.bracket) || null, model: (valuation && valuation.model) || null, vrakpant: !!(valuation && valuation.vrakpant), breakdown: (valuation && valuation.breakdown) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride, kjorbar: kjorbarInfo.kjorbar, wrecker: !!kjorbarInfo.wrecker, finn_link: (finnSelf && finnSelf.link) || null, finn_price: (finnSelf && Number(finnSelf.price)) || null, finn_sold: (finnSelf && finnSelf.sold) || null, finn_source: (finnSelf && finnSelf.source) || null, finn_utpris: (v2 && v2.finn_utpris && v2.finn_utpris.finn_utpris != null) ? v2.finn_utpris.finn_utpris : ((anchor && Number.isFinite(Number(anchor.price))) ? Number(anchor.price) : null), origin_cap: (v2 && v2.finn_utpris && v2.finn_utpris.origin_cap != null) ? v2.finn_utpris.origin_cap : null, finn_utpris_grunn: (v2 && v2.finn_utpris && (v2.finn_utpris.finn_utpris_grunn || (v2.finn_utpris.kilde === 'kun_kundens_annonse' || v2.finn_utpris.grunn === 'kun_kundens_annonse' ? 'kun kundens annonse' : v2.finn_utpris.grunn))) || null, annonsepris: (v2 && v2.finn_utpris && v2.finn_utpris.annonsepris != null) ? v2.finn_utpris.annonsepris : ((finnSelf && Number(finnSelf.price)) || null), always_qa: !!(v2 && v2.finn_utpris && v2.finn_utpris.always_qa), low_confidence: !!(v2 && v2.finn_utpris && v2.finn_utpris.low_confidence) || easyConfidence === 'lav', valgte_comps: (v2 && v2.finn_utpris && v2.finn_utpris.valgte_comps) || (v2 && v2.anchor && v2.anchor.valgte_comps) || [], ekskluderte: (v2 && v2.finn_utpris && v2.finn_utpris.ekskluderte) || [] }, (function(){ var own = (v2 && v2.finn_utpris && v2.finn_utpris.valgte_comps) || (v2 && v2.anchor && v2.anchor.valgte_comps) || []; var sc = scoreEasyIdentComps(vegData, bil, finnSelf, own, (collected && collected.comps) || own); if (sc) log('ident/comps ' + regnr + ' ident=' + sc.ident + ' comps=' + sc.comps + ' n=' + sc.n + ' match=' + sc.nMatch); return sc ? { ident_score: sc.ident, comps_score: sc.comps, combined_score: sc.combined, comps_count: sc.n, ident_label: (v2 && v2.finn_utpris && v2.finn_utpris.ident_label) || ((vegData && vegData.make || '') + ' ' + ((vegData && vegData.model) || (bil && bil.model_series) || '')).trim(), n_rejected: (v2 && v2.finn_utpris && v2.finn_utpris.n_rejected) || 0, comps_n_sold: (v2 && v2.finn_utpris && v2.finn_utpris.n_sold) || 0, comps_n_ask: (v2 && v2.finn_utpris && v2.finn_utpris.n_ask) || 0, chefs: (v2 && v2.finn_utpris && v2.finn_utpris.chefs) || null } : {}; })())
         });
         writeEasyMeasurement(regnr, erpId, bil, originCV, v2Payload);
         fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2Payload + '\n');
@@ -3753,30 +3761,23 @@ async function pollTelegramCommands(cache) {
           const d = _evalDataMap[aId];
           if (!d) { await sendTelegram(`❌ Mangler kalkyle-data for ${aRegnr}, kjor eval paa nytt.`); continue; }
           try {
-            // Ingen comp-cap ved manuell overstyring — tom pool gir ren spread fra ditt anker
-            const nyVal = calcValuation(nyAnker, d.segment, [], {
-              regnr: aRegnr,
+            // v20.168: Endre anker går gjennom fossefallet (samme som QA «Sett Finn-pris»), for A, B og Ordna.
+            const { planQaAnker } = require('./qa-anker-plan');
+            const plan = await planQaAnker({
+              anker: nyAnker,
+              km: (d.bil && d.bil.mileage) || 0,
               year: (d.vegData && d.vegData.firstRegYear) || (d.bil && d.bil.model_year) || 0,
               egenvekt: d.bil && d.bil.egenvekt,
+              erpId: aId,
+              source: d.bil && d.bil.source,
               isVarebil: !!(d.vegData && (d.vegData.isVarebil || /varebil/i.test((d.vegData && d.vegData.avgiftsgruppe) || ''))),
-              avgiftsgruppe: d.vegData && d.vegData.avgiftsgruppe
             });
+            if (!plan.ok) { await sendTelegram(`⚠️ ${aRegnr}: PRIS MANUELT — ${plan.grunn}. ERP er ikke endret.`); continue; }
+            const nyVal = { dLav: plan.dLav, dHoy: plan.dHoy, auctionTypeId: plan.auctionTypeId };
             const tok = await getErpToken();
-            try {
-              const { easyShouldSkipWrite } = require('./ab-arm.js');
-              const why = easyShouldSkipWrite(aId, d.bil && d.bil.source);
-              if (why === 'ordna') {
-                await sendTelegram(`Ordna: ${aRegnr} eies av V3G. Easy endrer ikke ERP-pris.`);
-                continue;
-              }
-              if (why === 'arm-B') {
-                await sendTelegram(`A/B: ${aRegnr} er arm B (V3G). Easy endrer ikke ERP-pris.`);
-                continue;
-              }
-            } catch (eAb) {}
             await writeToERP(aId, nyVal.dLav, nyVal.dHoy, nyVal.auctionTypeId, d.anyDebts, d.brreg, tok, nyAnker);
             try { await pushEasyOverride(aRegnr, aId, nyAnker, nyVal); } catch (eOv) { logErr('pushEasyOverride', eOv); }
-            const kalkyle = formatKalkyleBlock(nyVal, nyAnker);
+            const kalkyle = fossefallCard.formatFossefallBlock(plan.card) + '\nSkrevet (' + (plan.arm === 'O' ? 'Ordna' : plan.arm) + '): ' + nyVal.dLav + ' – ' + nyVal.dHoy;
             const nowStr = new Date().toLocaleString('nb-NO', { timeZone: 'Europe/Oslo' });
             const fullKortTekst = `🔄 ENDRE ANKER ${aRegnr} — ${nowStr}\n\n${kalkyle}`;
             try {
