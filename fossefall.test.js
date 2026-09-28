@@ -46,7 +46,7 @@ const ff = require('./fossefall');
   assert.strictEqual(ff.egenvektOmregSpenn({ year: 2024, isVarebil: true }), 0);
 }
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.159');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.160');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -172,6 +172,15 @@ assert.strictEqual(ff.lookupFossefallCell(pctSat, 200000, 80000).ok, false);
 pctSat.margin['150-250|50-120'] = '38000';
 assert.strictEqual(ff.lookupFossefallCell(pctSat, 200000, 80000).margin, 38000);
 assert.strictEqual(ff.lookupFossefallCell(pctSat, 200000, 80000).marginPct, null);
+
+// v20.160: over øverste bånd → øverste rad (margin klemmes av maks), ikke PRIS MANUELT
+const topp = pctSat.axes.price[pctSat.axes.price.length - 1];
+const over = ff.lookupFossefallCell(pctSat, topp.max + 2000000, 80000);
+assert.strictEqual(over.ok, true);
+assert.strictEqual(over.priceId, topp.id);
+assert.strictEqual(over.margin, pctSat.max[topp.id]);
+// under laveste bånd er fortsatt utenfor
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 1000, 80000).ok, false);
 
 const a = arm('a');
 const b = arm('b');

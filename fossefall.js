@@ -23,7 +23,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.159';
+const FOSSEFALL_VERSION = 'v20.160';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -803,7 +803,10 @@ function lookupFossefallCell(satser, finn, km) {
   if (!satser || typeof satser !== 'object' || !satser.axes) {
     return { ok: false, grunn: 'satser ikke lastet' };
   }
-  const priceBand = findBand(satser.axes.price, finn);
+  let priceBand = findBand(satser.axes.price, finn);
+  // v20.160: over øverste bånd (i dag 2 mill.) → øverste rad. Margin klemmes av radens maks.
+  const toppBand = Array.isArray(satser.axes.price) ? satser.axes.price[satser.axes.price.length - 1] : null;
+  if (!priceBand && toppBand && Number(finn) > Number(toppBand.max)) priceBand = toppBand;
   if (!priceBand) return { ok: false, grunn: 'utenfor akser (pris)' };
   const kmBand = findBand(satser.axes.km, km);
   if (!kmBand) return { ok: false, grunn: 'utenfor akser (km)' };
