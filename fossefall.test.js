@@ -46,7 +46,7 @@ const ff = require('./fossefall');
   assert.strictEqual(ff.egenvektOmregSpenn({ year: 2024, isVarebil: true }), 0);
 }
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.158');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.159');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -140,6 +140,38 @@ clampSat.margin['150-250|50-120'] = 999999;
 const clamped = ff.lookupFossefallCell(clampSat, 180000, 80000);
 assert.strictEqual(clamped.marginRaw, 999999);
 assert.strictEqual(clamped.margin, 41000);
+
+// v20.159: margin som prosent av Finn-utpris. Ingen hopp ved båndgrensen 250k.
+const pctSat = JSON.parse(JSON.stringify(satser));
+pctSat.axes.price.push({ id: '250-400', min: 250000, max: 400000 });
+for (const k of pctSat.axes.km) {
+  pctSat.margin['150-250|' + k.id] = '10%';
+  pctSat.margin['250-400|' + k.id] = '10 %';
+  pctSat.takst['250-400|' + k.id] = 10000;
+  pctSat.spenn['250-400|' + k.id] = '20000|13000';
+}
+pctSat.min['250-400'] = 18000;
+pctSat.max['250-400'] = 54000;
+const p249 = ff.lookupFossefallCell(pctSat, 249000, 80000);
+const p250 = ff.lookupFossefallCell(pctSat, 250000, 80000);
+assert.strictEqual(p249.margin, 24900);
+assert.strictEqual(p249.marginPct, 10);
+assert.strictEqual(p250.margin, 25000);
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 180000, 80000).margin, 18000);
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 150000, 80000).margin, 15000);
+// min/maks klemmer fortsatt: 10 % av 150k = 15 000 ≥ min 13 000; desimal-komma leses
+pctSat.margin['150-250|50-120'] = '7,5%';
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 160000, 80000).margin, 13000);
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 200000, 80000).margin, 15000);
+// ugyldig prosent → tom celle (PRIS MANUELT), aldri et oppfunnet tall
+pctSat.margin['150-250|50-120'] = '0%';
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 200000, 80000).ok, false);
+pctSat.margin['150-250|50-120'] = 'ti%';
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 200000, 80000).ok, false);
+// kronebeløp virker som før, også som tekst
+pctSat.margin['150-250|50-120'] = '38000';
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 200000, 80000).margin, 38000);
+assert.strictEqual(ff.lookupFossefallCell(pctSat, 200000, 80000).marginPct, null);
 
 const a = arm('a');
 const b = arm('b');

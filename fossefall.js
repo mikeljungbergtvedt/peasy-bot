@@ -23,7 +23,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.158';
+const FOSSEFALL_VERSION = 'v20.159';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -728,6 +728,18 @@ function readKr(v) {
   return null;
 }
 
+/**
+ * Margin-celle som prosent av Finn-utpris: «10%», «10 %» eller «7,5%». Kronebeløp (tall) → null.
+ * Prosent gir jevn margin uten hopp ved båndgrensene; radens min/maks klemmer fortsatt.
+ */
+function readPct(v) {
+  if (typeof v !== 'string') return null;
+  const m = v.replace(/[\s  ]/g, '').replace(',', '.').match(/^(\d+(?:\.\d+)?)%$/);
+  if (!m) return null;
+  const p = Number(m[1]);
+  return p > 0 && p <= 100 ? p : null;
+}
+
 function readCell(table, priceId, kmId) {
   if (table == null || typeof table !== 'object') return undefined;
   const key = priceId + '|' + kmId;
@@ -796,8 +808,10 @@ function lookupFossefallCell(satser, finn, km) {
   const kmBand = findBand(satser.axes.km, km);
   if (!kmBand) return { ok: false, grunn: 'utenfor akser (km)' };
   const cell = priceBand.id + '|' + kmBand.id;
-  const marginRaw = readKr(readCell(satser.margin, priceBand.id, kmBand.id));
-  if (marginRaw == null) return { ok: false, grunn: 'tom celle margin ' + cell, priceId: priceBand.id, kmId: kmBand.id };
+  const marginCelle = readCell(satser.margin, priceBand.id, kmBand.id);
+  const marginPct = readPct(marginCelle);
+  const marginRaw = marginPct != null ? Math.round((Number(finn) * marginPct) / 100 / 100) * 100 : readKr(marginCelle);
+  if (marginRaw == null || !Number.isFinite(marginRaw)) return { ok: false, grunn: 'tom celle margin ' + cell, priceId: priceBand.id, kmId: kmBand.id };
   const takst = readKr(readCell(satser.takst, priceBand.id, kmBand.id));
   if (takst == null) return { ok: false, grunn: 'tom celle takst ' + cell, priceId: priceBand.id, kmId: kmBand.id };
   const spenn = parseSpenn(readCell(satser.spenn, priceBand.id, kmBand.id));
@@ -821,6 +835,7 @@ function lookupFossefallCell(satser, finn, km) {
     cell,
     marginRaw,
     margin,
+    marginPct,
     marginMin,
     marginMax,
     takst,
@@ -954,6 +969,7 @@ function computeSharedFossefall(opts) {
       celleId,
       marginRaw,
       margin,
+      marginPct: looked.marginPct != null ? looked.marginPct : null,
       takst,
       ned,
       opp,
