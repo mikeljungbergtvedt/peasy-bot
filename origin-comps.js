@@ -113,6 +113,8 @@ function originSpec(o) {
     drive: driveClass(driveRaw + ' ' + (ident.model || '')) || fold(driveRaw),
     gir: girClass(ident.gir || ident.gearbox || cv.gir || '') || fold(ident.gir || ident.gearbox || cv.gir || ''),
     hk: Number.isFinite(hk) && hk > 0 ? hk : null,
+    // El og hybrid: rekkevidde (WLTP, elbilradar/Vegvesen) er proxy, aldri hk/kW.
+    range: (function () { const r = parseInt(String(ident.range || ident.rekkevidde || ident.rekkevidde_wltp || ident.elbRekkevidde || cv.rekkevidde || '').replace(/[^0-9]/g, ''), 10); return Number.isFinite(r) && r > 0 ? r : null; })(),
     generation: ident.generation || null,
     engine: ident.engine || ident.engine_name || null,
     variant: ident.variant || ident.sales_name || null,
@@ -120,10 +122,25 @@ function originSpec(o) {
   };
 }
 
+// El og hybrid: hk/kW er feil proxy (systemeffekt, overboost, Vegvesen = ofte bare forbrenningsmotor).
+function elEllerHybrid(spec) {
+  const t = ((spec && spec.fuel) || '') + ' ' + ((spec && spec.model) || '');
+  return /elektr|\bev\b|hybrid|phev|plugin|plug in/.test(t);
+}
+
+function adRekkevidde(ad, blob) {
+  const direkte = num(ad && (ad.range || ad.rekkevidde || ad.range_wltp));
+  if (direkte) return direkte;
+  const m = String(blob || '').match(/(\d{2,3})\s*km\s*(?:rekkevidde|wltp)|rekkevidde[^\d]{0,15}(\d{2,3})\s*km/);
+  return m ? Number(m[1] || m[2]) : null;
+}
+
 function identLabel(spec) {
   if (!spec || !spec.model) return '';
-  const hk = spec.hk ? spec.hk + 'hk' : '';
-  return [spec.make, spec.model, spec.year, spec.body, spec.fuel, spec.drive, spec.gir, hk].filter(Boolean).join(' · ');
+  const elHyb = elEllerHybrid(spec);
+  const hk = !elHyb && spec.hk ? spec.hk + 'hk' : '';
+  const rk = elHyb && spec.range ? spec.range + 'km rekkevidde' : '';
+  return [spec.make, spec.model, spec.year, spec.body, spec.fuel, spec.drive, spec.gir, hk, rk].filter(Boolean).join(' · ');
 }
 
 function lineFamily(modelFold) {
@@ -250,10 +267,20 @@ function rejectGrunn(ad, spec) {
   const adSaysPetrol = /\bbensin\b/.test(blob) && !adHybrid;
   if (originPhev && adSaysPetrol) return 'ikke hybrid';
   if (!originPhev && !originDiesel && !originEv && /bensin/.test(spec.fuel || '') && adHybrid) return 'hybrid';
-  const originHk = Number(spec.hk);
-  const adHkM = blob.match(/(\d{2,3})\s*hk/);
-  const adHk = num(ad && (ad.horsepower || ad.hk)) || (adHkM ? Number(adHkM[1]) : null);
-  if (originHk && adHk && Math.abs(originHk - adHk) > Math.max(20, originHk * 0.15)) return 'hk ' + adHk;
+  if (originEv || originPhev) {
+    // El/hybrid: aldri hk/kW. Rekkevidde når begge er kjent (el 15 %, hybrid 30 % og minst 15 km).
+    const oR = Number(spec.range);
+    const aR = adRekkevidde(ad, blob);
+    if (oR && aR) {
+      const grense = originEv ? oR * 0.15 : Math.max(15, oR * 0.30);
+      if (Math.abs(oR - aR) > grense) return 'rekkevidde ' + aR + ' km';
+    }
+  } else {
+    const originHk = Number(spec.hk);
+    const adHkM = blob.match(/(\d{2,3})\s*hk/);
+    const adHk = num(ad && (ad.horsepower || ad.hk)) || (adHkM ? Number(adHkM[1]) : null);
+    if (originHk && adHk && Math.abs(originHk - adHk) > Math.max(20, originHk * 0.15)) return 'hk ' + adHk;
+  }
   const y = spec.year;
   const ym = blob.match(/\b(20\d{2})\b/);
   const adY = num(ad && ad.year) || (ym ? Number(ym[1]) : null);
@@ -980,6 +1007,19 @@ if (require.main === module) {
     ],
     carInfo: {},
   });
+  // El: hk/kW brukes aldri (Taycan GTS 517 hk hos Vegvesen, 598/693 hk på Finn). Rekkevidde kaster når begge er kjent.
+  const ev = build({
+    erpId: 10,
+    regnr: 'EE92399',
+    km: 33500,
+    ident: { make: 'Porsche', model: 'Taycan GTS Sport Turismo', year: 2022, fuel: 'Elektrisk', karosseri: 'Stasjonsvogn', drive: 'AWD', gir: 'Automat', hk: 517, range: 490 },
+    finnPool: [
+      { price: 869000, km: 30000, status: 'aktiv', title: 'Porsche Taycan GTS - 2023 - Svart - 598 hk - Stasjonsvogn', url: 'https://finn.no/ev1' },
+      { price: 879000, km: 35000, status: 'aktiv', title: 'Porsche Taycan GTS - 2023 - Svart - 693 hk - Stasjonsvogn', url: 'https://finn.no/ev2' },
+      { price: 600000, km: 30000, status: 'aktiv', title: 'Porsche Taycan GTS - 2022 - 598 hk - Stasjonsvogn - 300 km rekkevidde', url: 'https://finn.no/ev3' },
+    ],
+    carInfo: {},
+  });
   const ok = rec.finn_utpris === 180000 && rec.n_own_sold === 1 && rec.n_sold === 3 && rec.n_ask === 3
     && empty.skip_put === true && empty.finn_utpris == null
     && cheapOrigin.finn_utpris === 162000 && /origin95/.test(cheapOrigin.finn_utpris_kilde)
@@ -988,10 +1028,13 @@ if (require.main === module) {
     && twins.finn_utpris >= 490000 && twins.finn_utpris <= 530000
     && driveGate.n_ask === 2 && driveGate.n_rejected >= 1
     && /awd/.test(driveGate.ident_label)
-    && hyb.n_sold === 1 && hyb.n_rejected >= 1
-    && /hybrid/.test(hyb.ident_label) && /122hk/.test(hyb.ident_label)
-    && ciTitle.n_sold === 1 && ciTitle.n_ask === 1 && ciTitle.n_rejected >= 1
-    && sisterFmt.n_ask === 1 && sisterFmt.n_rejected >= 1
+    // Hybrid: hk er ikke grunn til å kaste (Vegvesen-hk er ofte bare forbrenningsmotoren).
+    && hyb.n_sold === 2 && hyb.n_rejected === 0
+    && /hybrid/.test(hyb.ident_label) && !/hk/.test(hyb.ident_label)
+    && ciTitle.n_sold === 2 && ciTitle.n_ask === 1 && ciTitle.n_rejected === 0
+    && sisterFmt.n_ask === 2 && sisterFmt.n_rejected === 0
+    && ev.n_ask === 2 && ev.n_rejected === 1 && /rekkevidde 300/.test(((ev.rejected || [])[0] || {}).grunn || '')
+    && /490km rekkevidde/.test(ev.ident_label) && !/517hk/.test(ev.ident_label)
     && recHasMarket(rec) === true && recHasMarket(empty) === false;
   console.log(JSON.stringify({
     rec: { utpris: rec.finn_utpris, kilde: rec.finn_utpris_kilde, n_ext: rec.n_external, own: rec.n_own_sold, skip: rec.skip_put },
@@ -1000,6 +1043,7 @@ if (require.main === module) {
     equalAsk: { utpris: equalAsk.finn_utpris, kilde: equalAsk.finn_utpris_kilde },
     twins: { utpris: twins.finn_utpris, ask: twins.n_ask, sold: twins.n_sold, kastet: twins.n_rejected, kilde: twins.finn_utpris_kilde },
     driveGate: { ask: driveGate.n_ask, kastet: driveGate.n_rejected, label: driveGate.ident_label, rejected: (driveGate.rejected || []).map(function (r) { return r.grunn; }) },
+    ev: { ask: ev.n_ask, kastet: ev.n_rejected, label: ev.ident_label, rejected: (ev.rejected || []).map(function (r) { return r.grunn; }) },
     hyb: { sold: hyb.n_sold, kastet: hyb.n_rejected, label: hyb.ident_label, rejected: (hyb.rejected || []).map(function (r) { return r.grunn; }) },
     ciTitle: { sold: ciTitle.n_sold, ask: ciTitle.n_ask, kastet: ciTitle.n_rejected, rejected: (ciTitle.rejected || []).map(function (r) { return r.grunn; }) },
     sisterFmt: { ask: sisterFmt.n_ask, kastet: sisterFmt.n_rejected, rejected: (sisterFmt.rejected || []).map(function (r) { return r.grunn; }) },

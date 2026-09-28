@@ -147,6 +147,7 @@ function identForComps(locked, fallback) {
     drive: L.drivlinje || F.drive || '',
     gir: L.gir || F.gir || '',
     hk: L.hk || F.hk || null,
+    range: L.range || F.range || null, // el/hybrid: rekkevidde er tvilling-proxy, ikke hk
     generation: L.generation || F.generation || null,
     engine: L.engine || F.engine || null,
     variant: L.variant || F.variant || null,
