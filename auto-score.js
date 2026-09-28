@@ -3,7 +3,7 @@
 //
 //   Finn-utpris sikker   40  (AI enige 15, nære solgte 15, ikke ekstrapolert 10)
 //   Cellen testet        30  (ekte bud i cellen 20, treff over lav 10)
-//   Data komplett        20  (km stemmer 8, år/egenvekt 4, bilder 5, kommentar 3)
+//   Data komplett        20  (km stemmer 10, år/egenvekt 6, kommentar 4). Bilder gir ikke poeng: boten bruker dem ikke til pris.
 //   ERP = QA-kort        10
 // Stopp (aldri auto): vrak, km-feil, PRIS MANUELT, AI svært uenige, always_qa/low_confidence, 0 eksterne comps.
 // Heftelser stopper IKKE (alle biler har heftelser når estimatet sendes).
@@ -117,17 +117,15 @@ function scoreKort({ erp, dossier, maaling, signal, celler }) {
 
   // 3. Data komplett (20)
   const erpKm = num(erp.km);
-  let kmP = 8;
+  let kmP = 10;
   if (erpKm != null && originKm != null && originKm > 0) {
     const r = Math.abs(erpKm - originKm) / Math.max(erpKm, originKm);
     if (r > 0.2) { kmP = 0; stopp.push(`km-feil (ERP ${erpKm}, annonse ${originKm})`); }
   }
-  const aarP = (originYear ? 2 : 0) + (arm.omregistrering_note && /fallback/i.test(arm.omregistrering_note) ? 0 : 2);
-  const bilder = num(signal && signal.imageCount) || 0;
-  const bildeP = bilder > 0 ? 5 : 0;
-  if (!bilder) grunner.push('ingen bilder');
-  const kommP = signal && signal.hasComment ? 3 : 0;
-  deler.data = kmP + aarP + bildeP + kommP;
+  const aarP = (originYear ? 3 : 0) + (arm.omregistrering_note && /fallback/i.test(arm.omregistrering_note) ? 0 : 3);
+  const kommP = signal && signal.hasComment ? 4 : 0;
+  if (!kommP) grunner.push('ingen kommentar fra selger');
+  deler.data = kmP + aarP + kommP;
 
   // 4. ERP = QA-kort (10)
   const lik = num(arm.lav) != null && num(arm.lav) === num(erp.lav) && num(arm.hoy) === num(erp.hoy);
