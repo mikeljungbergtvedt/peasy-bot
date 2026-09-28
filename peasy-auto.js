@@ -70,7 +70,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-function writeEasyMeasurement(regnr, erpId, bil, originCV, payloadJson) {
+function writeEasyMeasurement(regnr, erpId, bil, originCV, payloadJson, ffCard) {
   if (bil && bil.testMode) return;
   try {
     const parsed = typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson;
@@ -92,8 +92,9 @@ function writeEasyMeasurement(regnr, erpId, bil, originCV, payloadJson) {
       origin_cv: originCV || null,
       easyEval: parsed && parsed.easy_eval,
       soldDays: _soldDays,
+      fossefallCard: ffCard || null, // v20.170: samme kort som ERP fikk → QA viser ERP-tallet
     });
-    log("[easy-meas] " + regnr);
+    log("[easy-meas] " + regnr + (ffCard ? " (ERP-kortet)" : ""));
   } catch (eMeas) {
     logErr("easy-meas", eMeas);
   }
@@ -3432,7 +3433,7 @@ async function evalCar(bil, page, cache, opts = {}) {
           origin_cv: originCV || null,
           easy_eval: Object.assign({ egenvekt: bil.egenvekt || null, anker: (anchor && Number.isFinite(Number(anchor.price))) ? Number(anchor.price) : null, dLav: (valuation && Number.isFinite(Number(valuation.dLav))) ? Number(valuation.dLav) : null, dHoy: (valuation && Number.isFinite(Number(valuation.dHoy))) ? Number(valuation.dHoy) : null, bracket: (valuation && valuation.bracket) || null, model: (valuation && valuation.model) || null, vrakpant: !!(valuation && valuation.vrakpant), breakdown: (valuation && valuation.breakdown) || null, confidence: (easyConfidence != null ? easyConfidence : ((v2 && v2.anchor && v2.anchor.confidence != null) ? v2.anchor.confidence : null)), begrunnelse_kort: (easyBegr || ((v2 && v2.anchor && v2.anchor.begrunnelse_kort) || null)), anker_kilde: ankerKilde, km_override: kmOverride, kjorbar: kjorbarInfo.kjorbar, wrecker: !!kjorbarInfo.wrecker, finn_link: (finnSelf && finnSelf.link) || null, finn_price: (finnSelf && Number(finnSelf.price)) || null, finn_sold: (finnSelf && finnSelf.sold) || null, finn_source: (finnSelf && finnSelf.source) || null, finn_utpris: (v2 && v2.finn_utpris && v2.finn_utpris.finn_utpris != null) ? v2.finn_utpris.finn_utpris : ((anchor && Number.isFinite(Number(anchor.price))) ? Number(anchor.price) : null), origin_cap: (v2 && v2.finn_utpris && v2.finn_utpris.origin_cap != null) ? v2.finn_utpris.origin_cap : null, finn_utpris_grunn: (v2 && v2.finn_utpris && (v2.finn_utpris.finn_utpris_grunn || (v2.finn_utpris.kilde === 'kun_kundens_annonse' || v2.finn_utpris.grunn === 'kun_kundens_annonse' ? 'kun kundens annonse' : v2.finn_utpris.grunn))) || null, annonsepris: (v2 && v2.finn_utpris && v2.finn_utpris.annonsepris != null) ? v2.finn_utpris.annonsepris : ((finnSelf && Number(finnSelf.price)) || null), always_qa: !!(v2 && v2.finn_utpris && v2.finn_utpris.always_qa), low_confidence: !!(v2 && v2.finn_utpris && v2.finn_utpris.low_confidence) || easyConfidence === 'lav', valgte_comps: (v2 && v2.finn_utpris && v2.finn_utpris.valgte_comps) || (v2 && v2.anchor && v2.anchor.valgte_comps) || [], ekskluderte: (v2 && v2.finn_utpris && v2.finn_utpris.ekskluderte) || [] }, (function(){ var own = (v2 && v2.finn_utpris && v2.finn_utpris.valgte_comps) || (v2 && v2.anchor && v2.anchor.valgte_comps) || []; var sc = scoreEasyIdentComps(vegData, bil, finnSelf, own, (collected && collected.comps) || own); if (sc) log('ident/comps ' + regnr + ' ident=' + sc.ident + ' comps=' + sc.comps + ' n=' + sc.n + ' match=' + sc.nMatch); return sc ? { ident_score: sc.ident, comps_score: sc.comps, combined_score: sc.combined, comps_count: sc.n, ident_label: (v2 && v2.finn_utpris && v2.finn_utpris.ident_label) || ((vegData && vegData.make || '') + ' ' + ((vegData && vegData.model) || (bil && bil.model_series) || '')).trim(), n_rejected: (v2 && v2.finn_utpris && v2.finn_utpris.n_rejected) || 0, comps_n_sold: (v2 && v2.finn_utpris && v2.finn_utpris.n_sold) || 0, comps_n_ask: (v2 && v2.finn_utpris && v2.finn_utpris.n_ask) || 0, chefs: (v2 && v2.finn_utpris && v2.finn_utpris.chefs) || null } : {}; })())
         });
-        writeEasyMeasurement(regnr, erpId, bil, originCV, v2Payload);
+        writeEasyMeasurement(regnr, erpId, bil, originCV, v2Payload, _ffCard);
         fs.appendFileSync('/Users/bot/peasy-pricing-v2-queue.txt', v2Payload + '\n');
         log('[easy->v2] Matet shadow for ' + regnr);
       }
@@ -4311,7 +4312,7 @@ async function main() {
             statid_qa_kilde: payload.statidKilde || null,
             chefs: { merge: { finn_utpris: anker, method: 'qa', begrunnelse: 'QA manuell Finn-utpris' } },
           },
-        });
+        }, plan.card);
       } catch (eM) { logErr('qa-anker meas', eM); }
       try { addToCache(cache, erpId); } catch (eCch) { logErr('qa-anker cache', eCch); }
       try { if (typeof _bilCache !== 'undefined' && _bilCache) _bilCache.delete(regnr); } catch (_) {}
@@ -4373,13 +4374,9 @@ async function main() {
             await evalV3(plate, km, { erpId: bil.id, easyEval: easyEval || null });
             log('[qa-reeval] V3 ferdig ' + plate);
           })().catch((e) => logErr('[qa-reeval] V3', e)),
-          (async () => {
-            const { evalRegnr: evalV3g } = await import('./v3g/v3g-eval.js');
-            await evalV3g(plate, km, { erpId: bil.id });
-            log('[qa-reeval] V3G ferdig ' + plate + ' erpId=' + bil.id);
-          })().catch((e) => logErr('[qa-reeval] V3G', e)),
+          // v20.170: V3G stoppet (beslutning 24.09 — fossefallet er eneste motor). Ingen V3G-eval her.
         ]);
-        log('[qa-reeval] ferdig Easy+V3+V3G ' + plate);
+        log('[qa-reeval] ferdig Easy+V3 ' + plate);
       } finally {
         clearReevalLock(plate);
       }

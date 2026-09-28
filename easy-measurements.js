@@ -9,7 +9,7 @@ const { easyField } = require('./shared/easy-meas-field.js');
 const MEASUREMENTS_FILE = process.env.PEASY_EASY_MEAS_FILE
   || path.join(__dirname, 'v2/logs.nosync/measurements.jsonl');
 
-function appendEasyMeasurement({ regnr, km, erpId, source, origin_cv, easyEval, timestamp, soldDays } = {}) {
+function appendEasyMeasurement({ regnr, km, erpId, source, origin_cv, easyEval, timestamp, soldDays, fossefallCard } = {}) {
   const plate = String(regnr || '').toUpperCase().replace(/\s/g, '');
   if (!plate) return { ok: false, error: 'regnr mangler' };
   let fossefall = null;
@@ -17,6 +17,10 @@ function appendEasyMeasurement({ regnr, km, erpId, source, origin_cv, easyEval, 
     const { buildFossefall } = require('./fossefall');
     const easyObj = easyField(easyEval) || {};
     const finn = Number(easyObj.finn_utpris != null ? easyObj.finn_utpris : easyObj.anker);
+    // v20.170: kortet som ble skrevet til ERP brukes som det er. Ny utregning her ga andre tall enn ERP
+    // (RK76294: ERP B 34–45, målingen B 31–42), og QA-kortet leser målingen.
+    const _ferdigKort = fossefallCard && typeof fossefallCard === 'object' && fossefallCard.a
+      ? JSON.parse(JSON.stringify(fossefallCard)) : null;
     if (Number.isFinite(finn) && finn > 0) {
       const year = (origin_cv && (origin_cv.aar || origin_cv.model_year || origin_cv.year
         || (origin_cv.identity && origin_cv.identity.year)
@@ -47,7 +51,7 @@ function appendEasyMeasurement({ regnr, km, erpId, source, origin_cv, easyEval, 
         { dLav: easyObj.dLav, dHoy: easyObj.dHoy },
         hintsA
       );
-      const _built = buildFossefall({
+      const _built = _ferdigKort || buildFossefall({
         statidKrQa: Number.isFinite(_qaStatid) && _qaStatid <= 0 ? _qaStatid : undefined,
         finnUtpris: finn,
         km: km,
@@ -71,7 +75,7 @@ function appendEasyMeasurement({ regnr, km, erpId, source, origin_cv, easyEval, 
         })(),
       });
       const cardMod = require('./fossefall-card');
-      fossefall = cardMod.cardFromBuilt(_built) || _built;
+      fossefall = _ferdigKort || cardMod.cardFromBuilt(_built) || _built;
       // v20.166: ståtid-forslag fra carinfo (vises i QA, trekkes aldri automatisk) og QA-godkjent ståtid.
       try {
         if (fossefall && typeof fossefall === 'object') {
