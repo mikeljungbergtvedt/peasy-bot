@@ -35,14 +35,22 @@ const clamp01 = (x) => Math.max(0, Math.min(1, x));
 
 function lesJson(fil) { try { return JSON.parse(fs.readFileSync(fil, 'utf8')); } catch (_) { return null; } }
 
-function sisteMaaling(regnr) {
+// Samme bil kan ligge flere ganger i ERP med ulike internnr — hver lever sitt eget liv.
+// Nyeste måling med samme erpId; bare hvis ingen har erpId, nyeste med samme regnr.
+function sisteMaaling(regnr, erpId) {
   let rows;
   try { rows = fs.readFileSync(MAALINGER, 'utf8').split('\n'); } catch (_) { return null; }
+  let reserve = null;
   for (let i = rows.length - 1; i >= 0; i--) {
     if (!rows[i] || rows[i].indexOf(regnr) === -1) continue;
-    try { const r = JSON.parse(rows[i]); if (plate(r.regnr) === regnr && r.fossefall) return r; } catch (_) {}
+    try {
+      const r = JSON.parse(rows[i]);
+      if (plate(r.regnr) !== regnr || !r.fossefall) continue;
+      if (erpId != null && r.erpId != null && String(r.erpId) === String(erpId)) return r;
+      if (!reserve && r.erpId == null) reserve = r;
+    } catch (_) {}
   }
-  return null;
+  return reserve;
 }
 
 function lesDossier(id, regnr) {
@@ -165,7 +173,7 @@ async function byggAutoScore() {
     const dnc = b.drive_no_car_data || {};
     const erp = { id: b.id, source: b.source, km: b.mileage != null ? b.mileage : dnc.mileage, aar: dnc.model_year,
       lav: b.price_final_min, hoy: b.price_final_max };
-    const maaling = sisteMaaling(regnr);
+    const maaling = sisteMaaling(regnr, b.id);
     const r = scoreKort({ erp, dossier: lesDossier(b.id, regnr), maaling, signal: sigByReg[regnr], celler });
     return Object.assign({ regnr, id: b.id, kilde: b.source || null,
       bil: [dnc.manufacturer_name || b.manufacturer, dnc.model_series, dnc.model_year].filter(Boolean).join(' '),
