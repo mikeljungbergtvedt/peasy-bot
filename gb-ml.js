@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const GB_ML_VERSION = 'gb-ml v2 (29.09: varebil, ingen merke-fallback, el/hybrid rekkevidde, trim)';
 
 const ROOT = __dirname;
 const ENGINE = path.join(ROOT, 'gb-ml');
@@ -133,7 +134,7 @@ function progress(regnr) {
 function getGbMl(regnrRaw, opts) {
   const regnr = normRegnr(regnrRaw);
   const force = !!(opts && opts.force);
-  if (!/^[A-Z0-9]{2,8}$/.test(regnr)) return { status: 'error', err: 'ugyldig reg.nr' };
+  if (!/^[A-Z0-9]{2,8}$/.test(regnr)) return { status: 'error', err: 'ugyldig reg.nr', versjon: GB_ML_VERSION };
   if (!fs.existsSync(carinfoPath(regnr))) {
     return { status: 'error', err: 'Mangler Car.info-cache for ' + regnr + ' (gb-ml gjør ingen Car.info-oppslag selv)' };
   }
