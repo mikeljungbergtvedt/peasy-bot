@@ -141,10 +141,10 @@ function getGbMl(regnrRaw, opts) {
   fs.mkdirSync(CACHE, { recursive: true });
   const P = paths(regnr);
   const st = jobs.get(regnr);
-  if (st && st.phase !== 'error') return { status: 'running', phase: st.phase, started_at: st.started_at, progress: progress(regnr) };
+  if (st && st.phase !== 'error') return { status: 'running', versjon: GB_ML_VERSION, phase: st.phase, started_at: st.started_at, progress: progress(regnr) };
   if (st && st.phase === 'error' && !force) { jobs.delete(regnr); return { status: 'error', err: st.err }; }
   if (!force && fresh(P.result, RESULT_TTL_MS)) {
-    try { return { status: 'ready', result: JSON.parse(fs.readFileSync(P.result, 'utf8')) }; } catch (e) { /* bygg på nytt */ }
+    try { return { status: 'ready', versjon: GB_ML_VERSION, result: JSON.parse(fs.readFileSync(P.result, 'utf8')) }; } catch (e) { /* bygg på nytt */ }
   }
   jobs.set(regnr, { started_at: new Date().toISOString(), phase: 'start' });
   job(regnr, force);
