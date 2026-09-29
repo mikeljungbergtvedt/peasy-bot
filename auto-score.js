@@ -310,6 +310,43 @@ async function autoSend(data, log) {
   return { paa: true, sendt };
 }
 
+// Hva kunden gjorde med auto-sendte biler: status fra ERP + grunn (valg og egne ord) fra bilens logg. Hvert 10. min.
+const UTFALL = path.join(__dirname, 'logs.nosync', 'auto-sendt-utfall.json');
+const STATUS_TEKST = {
+  ORDER_DELIVERY: 'Venter på kunden', REJECTED_BY_CUSTOMER: 'Avvist av kunden', REJECTED_BY_TIMEOUT: 'Utløpt uten svar',
+  REJECTED_BY_ADMIN: 'Avvist av oss', REJECT_DELIVERY_UNAVAILABLE: 'Avvist (henting ikke mulig)',
+};
+function utfallTekst(st) {
+  if (!st) return 'Ukjent';
+  if (STATUS_TEKST[st]) return STATUS_TEKST[st];
+  if (/REJECT/.test(st)) return 'Avvist';
+  return 'Akseptert (' + st.toLowerCase().replace(/_/g, ' ') + ')';
+}
+async function oppdaterUtfall(sendt) {
+  const cache = lesJson(UTFALL) || {};
+  const na = Date.now();
+  const trengs = sendt.filter((x) => x.ok && (!cache[x.id] || na - Date.parse(cache[x.id].sjekket) > 10 * 60000));
+  if (trengs.length) {
+    try {
+      const tok = (await (await fetch(ERP + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: process.env.ERP_USER, password: process.env.ERP_PASS }) })).json()).data.token.token;
+      const { reasonLabel } = require('./reject-reasons.js');
+      for (const x of trengs.slice(0, 30)) {
+        const c = await (await fetch(ERP + '/c2b_module/peasy/cars/' + x.id, { headers: { Authorization: 'Bearer ' + tok } })).json();
+        const car = (c.data && (c.data.car || c.data)) || {};
+        const logg = Array.isArray(car.log) ? car.log : Object.values(car.log || {});
+        const avv = logg.filter((l) => l && l.event === 'rejected.by.customer').pop();
+        const valgt = avv ? reasonLabel(avv.data && avv.data.reason_id) : null;
+        const ord = avv && avv.data && avv.data.comment && String(avv.data.comment).trim() !== valgt && !/^cars\.reject_reason\./.test(String(avv.data.comment)) ? String(avv.data.comment).trim() : null;
+        cache[x.id] = { status: car.status || null, tekst: utfallTekst(car.status), valgt, ord, sjekket: new Date().toISOString() };
+      }
+      fs.mkdirSync(path.dirname(UTFALL), { recursive: true });
+      fs.writeFileSync(UTFALL, JSON.stringify(cache));
+    } catch (e) { console.error('utfall:', e.message); }
+  }
+  return sendt.map((x) => Object.assign({}, x, { utfall: cache[x.id] || null }));
+}
+
 module.exports = { VERSJON, GRENSE, scoreKort, byggAutoScore, autoSend };
 
 if (require.main === module) {
@@ -325,14 +362,14 @@ if (require.main === module) {
       const nye = skrivSkygge(data);
       const as = await autoSend(data);
       data.auto_send_paa = as.paa;
-      data.auto_sendt = lesSendt().slice(-200).reverse();
+      data.auto_sendt = await oppdaterUtfall(lesSendt().slice(-200).reverse());
       data.historikk = lesHistorikk(200);
       // Pulse (QA send) leser ruter: id → vurderes | auto | qa. Bilen vises på QA send bare når rute = qa.
       data.ruter = {};
       for (const b of data.biler) data.ruter[b.id] = b.auto_sendt ? 'sendt' : b.rute;
       // Push bare ved endring, ellers hvert 10. min som livstegn (Pulse viser alt hvis fila er > 15 min gammel).
       const PUSHFIL = path.join(__dirname, 'logs.nosync', 'auto-score-push.json');
-      const sig = JSON.stringify([data.ruter, data.biler.map((b) => [b.id, b.score]), data.auto_sendt.length, data.historikk.length]);
+      const sig = JSON.stringify([data.ruter, data.biler.map((b) => [b.id, b.score]), data.auto_sendt.map((x) => [x.id, x.utfall && x.utfall.status]), data.historikk.length]);
       const forrige = lesJson(PUSHFIL) || {};
       if (sig === forrige.sig && Date.now() - (forrige.t || 0) < 10 * 60000) { console.log('uendret — ingen push'); return; }
       if (!process.env.GITHUB_TOKEN) throw new Error('GITHUB_TOKEN mangler i .env');
