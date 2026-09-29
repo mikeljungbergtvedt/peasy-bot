@@ -6,8 +6,9 @@ Skriver DOC-/AD-linjer (JSON) til stdout, og en META-linje først.
 
 Modellvalg (Finn-taksonomi fra søke-API-ets filtre):
   1. mest spesifikke Finn-modell (nivå 2) som matcher Car.info-navnet, hvis >= MIN_ADS treff
-  2. ellers Finn-serie (nivå 1)            -> fallback=True
-  3. ellers hele merket                    -> fallback=True
+  2. ellers Finn-serie (nivå 1)            -> fallback=True (også under MIN_ADS, da thin_data)
+  Aldri hele merket: en Hilux skal ikke sammenlignes med Auris. Ingen modell/serie -> ok=False.
+Registreringsklasse (--regclass): 1 personbil, 2 varebil. Settes fra Vegvesen (EU-klasse N1 = varebil).
 Leser bare fra finn.no. Skriver ingen filer selv (kalleren bestemmer hvor stdout havner).
 """
 import argparse, json, re, subprocess, sys, time, html as H, unicodedata
@@ -15,6 +16,8 @@ import argparse, json, re, subprocess, sys, time, html as H, unicodedata
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
 API = "https://www.finn.no/mobility/search/api/search/SEARCH_ID_CAR_USED"
 MIN_ADS = 40
+MIN_ADS_SERIE = 10  # under dette: for lite data
+REGCLASS = 1
 
 
 def get(url):
@@ -31,7 +34,7 @@ def fold(s):
 
 def search(params, page=1):
     q = '&'.join('%s=%s' % (k, v) for k, v in params.items())
-    return json.loads(get('%s?%s&registration_class=1&sales_form=1&page=%d' % (API, q, page)) or '{}')
+    return json.loads(get('%s?%s&registration_class=%d&sales_form=1&page=%d' % (API, q, REGCLASS, page)) or '{}')
 
 
 def walk_filters(o, out, depth=0, parent=None):
@@ -77,13 +80,18 @@ def resolve(ci):
             par = '1.' + '.'.join(best['value'].split('.')[1:3])
             p = next((i for i in cand if i['value'] == par), None)
             if p: chain.append(p)
-    chain.append(dict(name=make['name'], value=make['value'], hits=make['hits']))
+    tried = [dict(name=x['name'], code=x['value'], hits=x['hits']) for x in chain]
+    if not chain:
+        return dict(ok=False, err='fant ikke modellen på Finn (%s, %s)' % (brand, 'varebil' if REGCLASS == 2 else 'personbil'),
+                    regclass=REGCLASS, tried=tried)
     for level, c in enumerate(chain):
-        if c['hits'] >= MIN_ADS or level == len(chain) - 1:
+        siste = level == len(chain) - 1
+        if c['hits'] >= MIN_ADS or (siste and c['hits'] >= MIN_ADS_SERIE):
             return dict(ok=True, brand=brand, code=c['value'], name=c['name'], hits=c['hits'],
-                        level=('modell' if c['value'].startswith('2.') else 'serie' if c['value'].startswith('1.') else 'merke'),
-                        fallback=level > 0, tried=[dict(name=x['name'], code=x['value'], hits=x['hits']) for x in chain[:level + 1]])
-    return dict(ok=False, err='ingen kandidat')
+                        level=('modell' if c['value'].startswith('2.') else 'serie'),
+                        fallback=level > 0, thin=c['hits'] < MIN_ADS, regclass=REGCLASS, tried=tried[:level + 1])
+    return dict(ok=False, err='for lite data på Finn (%d annonser for %s)' % (chain[-1]['hits'], chain[-1]['name']),
+                regclass=REGCLASS, tried=tried)
 
 
 def strip(s):
@@ -96,7 +104,10 @@ def main():
     ap.add_argument('--max-ads', type=int, default=350)
     ap.add_argument('--delay', type=float, default=0.5)
     ap.add_argument('--resolve-only', action='store_true')
+    ap.add_argument('--regclass', type=int, default=1, choices=[1, 2])
     a = ap.parse_args()
+    global REGCLASS
+    REGCLASS = a.regclass
     ci = json.load(open(a.carinfo))
     res = resolve(ci)
     print('META ' + json.dumps(res, ensure_ascii=False), flush=True)

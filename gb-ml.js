@@ -59,17 +59,50 @@ function run(args, outFile, logFile) {
   });
 }
 
+// Fra Vegvesen: Finn-registreringsklasse (2 = varebil, EU-klasse N1/N1G, ellers 1), el/hybrid og WLTP-rekkevidde.
+// Uten Vegvesen: klasse fra Car.info (pickup/van/truck = 2). El/hybrid bruker rekkevidde, aldri hk/kW.
+async function vegInfo(regnr) {
+  const ut = { regclass: 1, elhyb: false, range: null };
+  try {
+    require('dotenv').config({ path: path.join(__dirname, '.env'), quiet: true });
+    const key = process.env.VEGVESEN_API_KEY;
+    const r = await fetch('https://akfell-datautlevering.atlas.vegvesen.no/enkeltoppslag/kjoretoydata?kjennemerke=' + encodeURIComponent(regnr),
+      { headers: { Accept: 'application/json', 'SVV-Authorization': key }, signal: AbortSignal.timeout(15000) });
+    const k = r.ok ? ((await r.json()).kjoretoydataListe || [])[0] : null;
+    if (k) {
+      const kl = k.godkjenning?.tekniskGodkjenning?.kjoretoyklassifisering?.tekniskKode || {};
+      if (/^N1/i.test(String(kl.kodeVerdi || '')) || /varebil/i.test(String(kl.kodeNavn || '') + ' ' + String(kl.kodeBeskrivelse || ''))) ut.regclass = 2;
+      const td = k.godkjenning?.tekniskGodkjenning?.tekniskeData;
+      const fuels = (td?.motorOgDrivverk?.motor || []).flatMap((m) => (m.drivstoff || []).map((d) => String(d.drivstoffKode?.kodeBeskrivelse || '')));
+      ut.elhyb = fuels.some((f) => /elektr|hybrid/i.test(f));
+      const rk = td?.miljodata?.miljoOgdrivstoffGruppe?.[0]?.forbrukOgUtslipp?.[0]?.wltpKjoretoyspesifikk?.rekkeviddeKmBlandetkjoring;
+      if (Number(rk) > 0) ut.range = Number(rk);
+      return ut;
+    }
+  } catch (_) {}
+  try {
+    const r = JSON.parse(fs.readFileSync(carinfoPath(regnr), 'utf8')).raw.result || {};
+    if (/truck|van/i.test(String(r.vehicle_type || '')) || /pickup|varebil|kassebil|van/i.test(String(r.chassis || ''))) ut.regclass = 2;
+  } catch (_) {}
+  return ut;
+}
+
 async function job(regnr, force) {
   const P = paths(regnr);
   const st = jobs.get(regnr);
   try {
     if (force || !fresh(P.finn, FINN_TTL_MS)) {
       st.phase = 'finn';
-      await run(['fetch_finn.py', '--carinfo', carinfoPath(regnr), '--max-ads', String(MAX_ADS), '--delay', String(DELAY)], P.finn + '.part', P.log);
+      st.veg = await vegInfo(regnr);
+      const regclass = st.veg.regclass;
+      await run(['fetch_finn.py', '--carinfo', carinfoPath(regnr), '--max-ads', String(MAX_ADS), '--delay', String(DELAY), '--regclass', String(regclass)], P.finn + '.part', P.log);
       fs.renameSync(P.finn + '.part', P.finn);
     }
     st.phase = 'train';
+    const veg = st.veg || await vegInfo(regnr);
     const args = ['train.py', '--carinfo', carinfoPath(regnr), '--data', P.finn, '--regnr', regnr, '--out', P.result + '.part'];
+    if (veg.elhyb) args.push('--elhyb');
+    if (veg.range) args.push('--range', String(veg.range));
     const dp = dossierPath(regnr);
     if (dp) args.push('--dossier', dp);
     await run(args, null, P.log);

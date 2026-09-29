@@ -121,9 +121,20 @@ def num(s):
     return float(m) if m else None
 
 
-def variant_of(model, hk):
-    """Generisk variant: Finn-modellnavn + effektbøtte (20 hk). Ingen merkespesifikke regler."""
-    b = 'hk%d' % (round(hk / 20.0) * 20) if hk else 'hk?'
+ELHYB = False  # målbilen er el eller hybrid: rekkevidde er proxy, aldri hk/kW
+
+
+def el_hyb(fuel):
+    f = fold(fuel or '')
+    return f == 'el' or f.startswith('el ') or 'elektr' in f or 'hybrid' in f
+
+
+def variant_of(model, hk, fuel=None, rng=None):
+    """Generisk variant: Finn-modellnavn + effektbøtte (20 hk). El/hybrid: rekkeviddebøtte (50 km), aldri hk."""
+    if el_hyb(fuel):
+        b = 'rk%d' % (round(rng / 50.0) * 50) if rng else 'rk?'
+    else:
+        b = 'hk%d' % (round(hk / 20.0) * 20) if hk else 'hk?'
     return '%s|%s' % (model or '?', b)
 
 
@@ -180,7 +191,8 @@ def load(path):
         if not price or price < 10000: continue
         hk = num(sp.get('Effekt'))
         rows.append(dict(finnkode=i, price=float(price), year=d.get('year'), km=d.get('mileage') or num(sp.get('Kilometerstand')),
-                         hk=hk, model=d.get('model'), variant=variant_of(d.get('model'), hk), fuel=d.get('fuel') or '?',
+                         hk=hk, rng=num(d.get('driving_range')), model=d.get('model'),
+                         variant=variant_of(d.get('model'), hk, d.get('fuel'), num(d.get('driving_range'))), fuel=d.get('fuel') or '?',
                          gear=d.get('transmission') or '?', dealer=d.get('dealer_segment') or '?',
                          sold='sold' in (d.get('flags') or []), spec=d.get('model_specification'),
                          equip=canon_items(a.get('utstyr') or []),
@@ -216,7 +228,10 @@ def design(df, feats, cats, base_only=False):
     km = df['km'].fillna(df['km'].median()).astype(float)
     cols['logkm'] = np.log1p(km).values
     cols['km_per_year'] = (km / np.clip(cols['age'], 0.5, None) / 1e4).values
-    cols['loghk'] = np.log(df['hk'].fillna(df['hk'].median() if df['hk'].notna().any() else 100).astype(float)).values
+    if ELHYB and 'rng' in df and df['rng'].notna().any():
+        cols['logrange'] = np.log(df['rng'].fillna(df['rng'].median()).astype(float)).values
+    else:
+        cols['loghk'] = np.log(df['hk'].fillna(df['hk'].median() if df['hk'].notna().any() else 100).astype(float)).values
     for col, vals in cats.items():
         for v in vals:
             cols['%s_%s' % (col, v)] = (df[col] == v).astype(float).values
@@ -246,10 +261,14 @@ def main():
     ap.add_argument('--carinfo', required=True); ap.add_argument('--data', required=True)
     ap.add_argument('--dossier'); ap.add_argument('--km', type=float); ap.add_argument('--dealer', default='Forhandler')
     ap.add_argument('--regnr'); ap.add_argument('--out', default='-')
+    ap.add_argument('--range', type=float, help='målbilens rekkevidde (WLTP km), el/hybrid')
+    ap.add_argument('--elhyb', action='store_true', help='målbilen er el eller hybrid (fra Vegvesen)')
     a = ap.parse_args()
 
     meta, n_search, df = load(a.data)
     tgt = carinfo_target(a.carinfo, a.km)
+    global ELHYB
+    ELHYB = bool(a.elhyb or el_hyb(tgt.get('fuel')))
     regnr = a.regnr or json.load(open(a.carinfo)).get('plate')
     utpris, utpris_kilde = dossier_utpris(a.dossier)
     out = dict(ok=True, regnr=regnr, generated_at=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
@@ -257,6 +276,9 @@ def main():
                           fuel=tgt['fuel'], packages=tgt['packages']),
                finn_model=meta, n_search=n_search, n_ads=int(len(df)), finn_utpris=utpris, finn_utpris_kilde=utpris_kilde,
                thin_data=len(df) < MIN_ADS, fallback=bool(meta.get('fallback')))
+    if meta.get('ok') is False:
+        out.update(ok=False, err=meta.get('err') or 'fant ikke modellen på Finn')
+        return emit(out, a.out)
     if len(df) < 10:
         out.update(ok=False, err='for få Finn-annonser med utstyr (%d)' % len(df))
         return emit(out, a.out)
@@ -289,16 +311,29 @@ def main():
     best = min(res, key=lambda k: res[k][0]); best_b = min(res_b, key=lambda k: res_b[k][0])
 
     # målbil (variant fra Car.info-modellnavn finnes ikke i Finn: bruk nærmeste Finn-modell med samme hk-bøtte)
-    tv_bucket = variant_of('', tgt['hk']).split('|')[1]
+    tv_bucket = variant_of('', tgt['hk'], 'el' if ELHYB else None, a.range).split('|')[1]
     same = df[df['variant'].str.endswith('|' + tv_bucket)]
-    t_variant = same['variant'].mode().iloc[0] if len(same) else None
+    # Velg varianten der Finn-modellnavnet står i bilens navn, mest spesifikk først (Taycan GTS foran Taycan / Taycan 4).
+    # Rekkevidde eller hk alene skiller ikke trim (Taycan 4 og GTS har begge ~450 km).
+    tname = fold(tgt.get('name') or '')
+    def navn_treff(v):
+        m = fold(v.split('|')[0]); toks = [t for t in m.split() if t]
+        return len(m) if toks and all(re.search(r'(^| )%s( |$)' % re.escape(t), tname) for t in toks) else -1
+    t_variant = None
+    for kand in ([same] if len(same) else []) + [df]:
+        vc = kand['variant'].value_counts()
+        rang = sorted(vc.index, key=lambda v: (navn_treff(v), vc[v]), reverse=True)
+        if rang and navn_treff(rang[0]) >= 0:
+            t_variant = rang[0]; break
+    if t_variant is None and len(same):
+        t_variant = same['variant'].mode().iloc[0]
     t_fuel = df['fuel'].mode().iloc[0]
     if tgt['fuel']:
         ff = [f for f in cats['fuel'] if f.lower()[:3] in tgt['fuel'].lower() or tgt['fuel'].lower()[:3] in f.lower()]
         if ff: t_fuel = ff[0]
     t_gear = df['gear'].mode().iloc[0]
     tequip = set(f for v in tgt['mapped'].values() for f in v) | {p['key'] for p in pkg_info if p['key']}
-    tdf = pd.DataFrame([dict(year=tgt['year'], km=tgt['km'], hk=tgt['hk'], variant=t_variant, fuel=t_fuel, gear=t_gear,
+    tdf = pd.DataFrame([dict(year=tgt['year'], km=tgt['km'], hk=tgt['hk'], rng=a.range, variant=t_variant, fuel=t_fuel, gear=t_gear,
                              dealer=a.dealer, equip=tequip)])
     Xt = design(tdf, feats, cats).reindex(columns=X.columns, fill_value=0.0)
     Xtb = design(tdf, feats, cats, base_only=True).reindex(columns=Xb.columns, fill_value=0.0)
