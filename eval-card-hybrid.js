@@ -117,6 +117,11 @@ function formatEvalCardHybrid(p, forErp = false) {
     const l4 = [];
     if (veg.motorCode || bil.motorEffekt) l4.push('Motor: ' + (bil.motorEffekt || veg.motorCode) + (veg.kw ? ` (${veg.kw} kW)` : ''));
     if (veg.forstegangNorgeDato) l4.push('Første reg Norge: ' + veg.forstegangNorgeDato);
+    // v20.175: hvor lenge nåværende eier har hatt bilen (Vegvesen). Lang eiertid = verditapet er tatt.
+    if (veg.eierFraDato && /^\d{4}-\d{2}-\d{2}$/.test(veg.eierFraDato)) {
+      const aar = (Date.now() - Date.parse(veg.eierFraDato)) / (365.25 * 864e5);
+      if (aar >= 0) l4.push('Eiertid: ' + aar.toFixed(1).replace('.', ',') + ' år (siden ' + veg.eierFraDato.split('-').reverse().join('.') + ')');
+    }
     if (bil.farge || veg.farge) l4.push('Farge: ' + (bil.farge || veg.farge));
     bilmodell = ['🚗 Bilmodell', l1, l2, l3, l4.join(' · ')].filter(Boolean).join('\n');
   }
