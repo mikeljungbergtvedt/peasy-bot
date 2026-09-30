@@ -184,7 +184,37 @@ async function main() {
     if (measFile.indexOf(GH_CLONE) === 0) cloneChanged = r.changed;
   }
   if (cloneChanged) pushClone(cloneChanged);
+  publishLoop2();
 }
+
+const LOOP2_SRC = '/Users/bot/peasy-auto/loop2/logs.nosync/loop2-measurements.jsonl';
+const LOOP2_DST = path.join(GH_CLONE, 'loop2-measurements.jsonl');
+
+function publishLoop2() {
+  if (!fs.existsSync(LOOP2_SRC)) {
+    console.log('backsync: ingen Mini loop2 jsonl');
+    return;
+  }
+  const srcBuf = fs.readFileSync(LOOP2_SRC);
+  if (!srcBuf.length) {
+    console.log('backsync: Mini loop2 jsonl tom');
+    return;
+  }
+  fs.copyFileSync(LOOP2_SRC, LOOP2_DST);
+  try {
+    git('add loop2-measurements.jsonl');
+    const status = git('status --porcelain loop2-measurements.jsonl');
+    if (!status) { console.log('backsync: loop2 jsonl uendret — hopper over push'); return; }
+    git('commit -m "loop2-measurements from Mini log"');
+    git('pull --rebase origin main');
+    safePush();
+    console.log('backsync: pushet loop2-measurements.jsonl (' + srcBuf.length + ' B)');
+  } catch (e) {
+    console.error('backsync: loop2 git-push FEILET: ' + ((e.stderr && e.stderr.toString().slice(0, 200)) || e.message));
+    gitTry('rebase --abort');
+  }
+}
+
 
 module.exports = { outcomeFromRow, applyOutcomes, toStr, toNum, measurementsFiles };
 if (require.main === module) {
