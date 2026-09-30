@@ -161,7 +161,7 @@ async function main() {
   const res = await fetch(XLSX_URL);
   if (!res.ok) { console.error('backsync FEIL: ERP-rapport HTTP ' + res.status); process.exit(1); }
   const wb = XLSX.read(Buffer.from(await res.arrayBuffer()), { type: 'buffer', cellDates: true });
-  const rows = require('./excel-kolonner').kanon(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })); // etter kolonnenavn
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
 
   const byId = new Map();
   for (const row of rows.slice(1)) {
