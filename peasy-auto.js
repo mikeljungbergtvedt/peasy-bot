@@ -113,7 +113,7 @@ const fossefallCard = require('./fossefall-card');
 const { classifyBiltype, formatScopeCard, scopeHeadline } = require('./biltype-gate');
 const { resolveKjorbar, wreckerPricing } = require('./kjorbar');
 
-const VERSION = 'v20.175'; // v20.175: eiertid (nåværende eier fra Vegvesen) på QA-kortet. v20.174: spenn bare oppover i prosent av lav, fra Innstillinger (fossefallSatser.spennOpp); lav = Peasy-bud. Uten spennOpp: spenntabellen som før. v20.173: GB-ML varebil fra Vegvesen, aldri hele merket, el/hybrid på rekkevidde, trim fra modellnavn. v20.172: varebil fra EU-klasse N1/N1G (pickup ble søkt som personbil). v20.171: Finn-utpris til ERP-feltet finn_asking_price (PS-162), flagg FINN_FELT_SKRIV (0/dry/1, standard 0); el/hybrid: tvillinger på rekkevidde, aldri hk/kW. v20.170: QA-kort = ERP-kort, V3G av, auto-send. v20.169: Finn-comps over 2 mill. tas med. v20.168:A skriver alle scenarioer (V3G skriver ikke ERP), ingen gammel kalkyle ved PRIS MANUELT, Endre anker via fossefallet, egenvekt fra carinfo; v20.167: avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
+const VERSION = 'v20.176'; // v20.176: ERP-eksporten leses etter kolonnenavn (excel-kolonner.js), tåler flyttede kolonner. v20.175: eiertid (nåværende eier fra Vegvesen) på QA-kortet. v20.174: spenn bare oppover i prosent av lav, fra Innstillinger (fossefallSatser.spennOpp); lav = Peasy-bud. Uten spennOpp: spenntabellen som før. v20.173: GB-ML varebil fra Vegvesen, aldri hele merket, el/hybrid på rekkevidde, trim fra modellnavn. v20.172: varebil fra EU-klasse N1/N1G (pickup ble søkt som personbil). v20.171: Finn-utpris til ERP-feltet finn_asking_price (PS-162), flagg FINN_FELT_SKRIV (0/dry/1, standard 0); el/hybrid: tvillinger på rekkevidde, aldri hk/kW. v20.170: QA-kort = ERP-kort, V3G av, auto-send. v20.169: Finn-comps over 2 mill. tas med. v20.168:A skriver alle scenarioer (V3G skriver ikke ERP), ingen gammel kalkyle ved PRIS MANUELT, Endre anker via fossefallet, egenvekt fra carinfo; v20.167: avvik bare på armen som eier bilen, egenvekt som merknad når den ikke påvirker omreg; v20.166: ståtid-forslag fra carinfo i QA, legges på bare med hake; v20.165: eval-kort og logg viser fossefallet, ikke easy-cost-v7; v20.164: nye målinger fra A publiseres til Pages hver natt; v20.163: scenario-kontroll: e-post i stedet for Telegram, pares på internnr; v20.162: scenario-kontroll hver natt (ERP-lav mot fossefallet); v20.161: postToChat finner eksisterende eval-kort (data.comments); v20.160: takst-celler v2: eldre biler fra 01.11 i heatmap (anker fra ERP-kommentar, bare lesing); v20.159: nattjobben skriver peasy-cells.json; v20.158: updateBracketsJson leser GITHUB_TOKEN fra .env; v20.154: QA Sett Finn-pris går gjennom fossefallet
 
 // Krasj-vern: logg uventede feil, men hold prosessen i live (launchd KeepAlive er backstop)
 process.on('unhandledRejection', (reason) => {
@@ -425,7 +425,7 @@ async function loadKmCache() {
     const buf = await refreshXlsxCache(false);
     const wb = XLSX.read(buf, { type: 'buffer' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const rows = require('./excel-kolonner').kanon(XLSX.utils.sheet_to_json(ws, { header: 1 }), (m) => log(m)); // v20.176: etter kolonnenavn
     _prevEvalsMap = {};
     for (const row of rows.slice(1)) {
       const regnr = String(row[1] || '').trim().toUpperCase().replace(/\s/g, '');
@@ -2273,7 +2273,7 @@ async function _refreshAuksjonHistorikk() {
     const buf = await refreshXlsxCache(false);
     const wb = XLSX.read(buf, { type: 'buffer' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const rows = require('./excel-kolonner').kanon(XLSX.utils.sheet_to_json(ws, { header: 1 }), (m) => log(m)); // v20.176: etter kolonnenavn
     const H = rows[0] || [];
     const iInternnr = H.indexOf('Internnr.');
     const iReg = H.indexOf('RegNr.');
@@ -4018,7 +4018,7 @@ async function refreshBracketsNightly() {
     const buf = await refreshXlsxCache(true);
     const wb = XLSX.read(buf, { type: 'buffer' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const rows = require('./excel-kolonner').kanon(XLSX.utils.sheet_to_json(ws, { header: 1 }), (m) => log(m)); // v20.176: etter kolonnenavn
     const all = rows.slice(1).filter(r => r[1]);
     await updateBracketsJson(all);
     // v20.159: takst-celler fra faktiske AR-bud → peasy-cells.json (heatmap i Pulse). Kaster aldri.

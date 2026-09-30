@@ -1,4 +1,5 @@
 import XLSX from 'xlsx';
+import excelKolonner from '../excel-kolonner.js';
 const XLSX_URL = 'https://api.biladministrasjon.no/public/reports/peasy/dhqui7Hkl54?output=xlsx';
 let _kmCache = {};
 let _loaded = false;
@@ -10,7 +11,7 @@ export async function loadKmCache(force = false) {
     const buf = await r.arrayBuffer();
     const wb = XLSX.read(Buffer.from(buf), { type: 'buffer' });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const rows = excelKolonner.kanon(XLSX.utils.sheet_to_json(ws, { header: 1 })); // etter kolonnenavn
     _kmCache = {};
     for (const row of rows.slice(1)) {
       const rn = String(row[1] || '').trim().toUpperCase().replace(/\s/g, '');
