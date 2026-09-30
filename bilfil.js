@@ -3,6 +3,8 @@
 // Steg 2 i _transit/excel-migrering.md. Bare lesing fra ERP.
 //   node bilfil.js                 bygg og skriv logs.nosync/peasy-cars.json
 //   node bilfil.js --test          bygg og sammenlign felt for felt mot Excel-eksporten
+//   node bilfil.js --push          bygg og skriv peasy-cars.json til Pages (Pulse leser den)
+//   node bilfil.js --push --hvis-nye   bare hvis det har kommet webhook-hendelser siden forrige bygging (launchd hvert 5. min)
 // Env for test fra klonen: BILFIL_ROOT=/Users/bot/peasy-auto
 
 const fs = require('fs');
@@ -12,6 +14,9 @@ const VERSJON = 'bilfil v1';
 const ROOT = process.env.BILFIL_ROOT || __dirname;
 const ERP = 'https://api.biladministrasjon.no';
 const UT = path.join(ROOT, 'logs.nosync', 'peasy-cars.json');
+const HENDELSER = path.join(ROOT, 'logs.nosync', 'erp-webhook-events.jsonl');
+const GH_REPO = 'mikeljungbergtvedt/mikeljungbergtvedt.github.io';
+const GH_FILE = 'peasy-cars.json';
 const XLSX_URL = 'https://api.biladministrasjon.no/public/reports/peasy/dhqui7Hkl54?output=xlsx';
 
 // Liste → status slik Excel-eksporten skriver den (kolonne M). rejected deles på status_entity.
@@ -109,15 +114,42 @@ async function test(fil) {
   return { excel_rader: rows.length, bilfil_biler: fil.biler.length, mangler_i_bilfil: mangler, felt: st };
 }
 
+async function pushTilPages(data, token) {
+  const url = `https://api.github.com/repos/${GH_REPO}/contents/${GH_FILE}`;
+  const h = { Authorization: `token ${token}`, Accept: 'application/vnd.github.v3+json' };
+  for (let forsok = 1; ; forsok++) {
+    const shaRes = await fetch(url, { headers: h });
+    const shaData = shaRes.ok ? await shaRes.json() : {};
+    const body = { message: `bilfil ${data.bygget.slice(0, 16)}`, content: Buffer.from(JSON.stringify(data)).toString('base64') };
+    if (shaData && shaData.sha) body.sha = shaData.sha;
+    const put = await fetch(url, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, h), body: JSON.stringify(body) });
+    const pd = await put.json();
+    if (pd && pd.content) return;
+    if (forsok >= 4) throw new Error('push feilet: ' + ((pd && pd.message) || put.status));
+    await new Promise((r) => setTimeout(r, 1500 * forsok));
+  }
+}
+
+// Har det kommet webhook-hendelser siden bilfilen sist ble bygget?
+function nyeHendelser() {
+  try { return fs.statSync(HENDELSER).mtimeMs > fs.statSync(UT).mtimeMs; } catch (_) { return true; }
+}
+
 module.exports = { VERSJON, bil, bygg };
 
 if (require.main === module) {
-  require('dotenv').config({ path: path.join(ROOT, '.env'), quiet: true });
+  require('dotenv').config({ path: path.join(ROOT, '.env'), override: true, quiet: true });
   (async () => {
+    if (process.argv.includes('--hvis-nye') && !nyeHendelser()) return;
     const d = await bygg();
     fs.mkdirSync(path.dirname(UT), { recursive: true });
     fs.writeFileSync(UT, JSON.stringify(d));
     console.log(`${d.bygget} ${VERSJON}: ${d.biler.length} biler, ${d.kall} kall → ${UT}`);
+    if (process.argv.includes('--push')) {
+      if (!process.env.GITHUB_TOKEN) throw new Error('GITHUB_TOKEN mangler i .env');
+      await pushTilPages(d, process.env.GITHUB_TOKEN);
+      console.log('peasy-cars.json skrevet');
+    }
     if (process.argv.includes('--test')) {
       const t = await test(d);
       console.log(`Excel ${t.excel_rader} rader, bilfil ${t.bilfil_biler} biler, ${t.mangler_i_bilfil} Excel-rader mangler i bilfil`);
