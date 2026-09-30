@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const fossefall = require('./fossefall');
 
-const VERSJON = 'takst-celler v3';
+const VERSJON = 'takst-celler v4'; // v4: Excel leses etter kolonnenavn (tåler flyttede kolonner)
 const FRA_DATO = '2025-11-01';
 const FORSLAG_VED_N = 20;
 const RAATTEN_GRENSE = -0.40;
@@ -33,6 +33,18 @@ const KOMMENTAR_FIL = path.join(__dirname, 'logs.nosync', 'kommentar-anker.json'
 
 // ERP-kolonner (0-basert), samme eksport som Pulse.
 const K = { internnr: 0, regnr: 1, estimat: 3, peasyBud: 4, aar: 8, kilde: 11, status: 12, registrert: 13, solgt: 18, bud: 19, retur: 21, km: 22 };
+// v4: kolonnenavn i ERP-eksporten for hver posisjon i K. Radene stokkes til K-rekkefølgen etter navn.
+const K_NAVN = { 0: 'Internnr.', 1: 'RegNr.', 3: 'Endelig AR verdi', 4: 'Høyeste bud', 8: 'År', 11: 'Kilde', 12: 'Status', 13: 'Registrert', 18: 'Solgt på', 19: 'Bud', 21: 'Returnert på', 22: 'KM' };
+
+/** Excel-rader (med header først) → rader i K-rekkefølge, funnet etter kolonnenavn. Mangler en kolonne, blir feltet tomt. */
+function kanonRader(rows) {
+  const h = (rows[0] || []).map((x) => String(x == null ? '' : x).trim().toLowerCase());
+  const idx = {};
+  for (const [pos, navn] of Object.entries(K_NAVN)) idx[pos] = h.indexOf(navn.toLowerCase());
+  const mangler = Object.entries(K_NAVN).filter(([pos]) => idx[pos] < 0).map(([, n]) => n);
+  const ut = rows.slice(1).map((r) => { const a = []; for (const pos of Object.keys(K_NAVN)) a[pos] = idx[pos] < 0 ? undefined : r[idx[pos]]; return a; });
+  return { rader: ut, mangler };
+}
 
 /** «dd.mm.åååå» (evt. med tid) → «åååå-mm-dd». */
 function isoDato(v) {
@@ -286,7 +298,9 @@ async function hentErpRader() {
   if (!res.ok) throw new Error('ERP-eksport HTTP ' + res.status);
   const wb = XLSX.read(Buffer.from(await res.arrayBuffer()), { type: 'buffer' });
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
-  return rows.slice(1).filter((r) => r && r[1]);
+  const k = kanonRader(rows);
+  if (k.mangler.length) console.warn('takst-celler: ERP-eksporten mangler kolonner:', k.mangler.join(', '));
+  return k.rader.filter((r) => r && r[1]);
 }
 
 function lesKommentarAnker(fil) {
@@ -335,7 +349,8 @@ async function oppdaterTakstCeller({ rows, getToken, log, logErr } = {}) {
     if (!token) { L('Takst-celler: GITHUB_TOKEN mangler i .env — hopper over'); return null; }
     const satser = await fossefall.loadFossefallSatser({ force: true });
     if (!satser) { L('Takst-celler: fossefallSatser ikke lastet — hopper over'); return null; }
-    const erpRader = rows || await hentErpRader();
+    // v4: henter alltid selv, etter kolonnenavn. Radene boten sender (etter posisjon) brukes ikke lenger.
+    const erpRader = await hentErpRader();
     try { await hentKommentarer(erpRader, getToken, L); } catch (eK) { E('kommentar-anker', eK); }
     const data = byggTakstCeller({ rows: erpRader, kilder: lesKilder(), satser });
     await pushTilPages(data, token);
@@ -348,7 +363,7 @@ async function oppdaterTakstCeller({ rows, getToken, log, logErr } = {}) {
   }
 }
 
-module.exports = { VERSJON, byggTakstCeller, oppdaterTakstCeller, indekserMaalinger, salaerPaaBud, lesKilder, hentErpRader, MAALINGER };
+module.exports = { VERSJON, kanonRader, byggTakstCeller, oppdaterTakstCeller, indekserMaalinger, salaerPaaBud, lesKilder, hentErpRader, MAALINGER };
 
 // Kjør for hånd på Mini:  node takst-celler.js        (viser bare)
 //                         node takst-celler.js --push (skriver peasy-cells.json)
