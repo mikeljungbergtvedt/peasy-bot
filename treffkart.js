@@ -3,6 +3,8 @@
 // Leser ERP-eksporten (bare lesing). Skriver treffkart.json på Pages med --push. Nattjobb: com.peasy.treffkart (00:05).
 // v2: to spørsmål. 1) Er Finn-utprisen riktig? Vår Finn-utpris (jr/dossiers) mot bilens Finn-pris etterpå
 //     (søk på reg.nr., bare tapte biler, bare annonser publisert etter estimatet). 2) Er fossefallet riktig? Bud mellom lav og høy.
+// v4: data fra bilfilen (logs.nosync/peasy-cars.json, ERP-endepunktene). Bare km leses fra Excel, etter kolonnenavn.
+//     Mangler bilfilen eller er den over 24 t gammel, brukes Excel som før.
 // v3: 3) Hvor lykkes vi? Estimat × alder (årsmodell fra ERP-eksporten). Eiertid leses fra cache hvis den finnes; ingen oppslag.
 //   node treffkart.js          vis antall
 //   node treffkart.js --push   skriv treffkart.json til Pages
@@ -10,7 +12,7 @@
 const path = require('path');
 const XLSX = require('xlsx');
 
-const VERSJON = 'treffkart v3';
+const VERSJON = 'treffkart v4';
 const ERP_XLSX_URL = 'https://api.biladministrasjon.no/public/reports/peasy/dhqui7Hkl54?output=xlsx';
 const GH_REPO = 'mikeljungbergtvedt/mikeljungbergtvedt.github.io';
 const GH_FILE = 'treffkart.json';
@@ -22,6 +24,7 @@ const FINN_STATE = path.join(ROOT, 'logs.nosync', 'treffkart-finn.json');
 const FINN_API = 'https://www.finn.no/mobility/search/api/search/SEARCH_ID_CAR_USED';
 const SOK_DAGER = 90;      // tapte biler estimert siste 90 dager søkes
 const SOK_PAUSE_MS = 1200;
+const BILFIL = path.join(ROOT, 'logs.nosync', 'peasy-cars.json');
 const VEG_STATE = path.join(ROOT, 'logs.nosync', 'treffkart-veg.json');
 const VEG_API = 'https://akfell-datautlevering.atlas.vegvesen.no/enkeltoppslag/kjoretoydata?kjennemerke=';
 const VEG_FRA = '2025-11-01';  // biler estimert fra denne datoen slås opp
@@ -51,12 +54,52 @@ function radFra(x) {
   return [x[0], x[1], est, Math.round((lav + hoy) / 2), Number(x[22]) || null, u, Number(x[4]) || null, x[11], [x[6], x[7], x[8]].filter(Boolean).join(' '), lav, hoy, null, null, Number(x[8]) || null, null];
 }
 
-async function bygg() {
+// Én rad fra bilfilen, samme format som radFra (Excel).
+function radFraBil(b, km) {
+  if (!b.estimert) return null;
+  const u = utfall(b.status); if (!u) return null;
+  const lav = Number(b.lav), hoy = Number(b.hoy); if (!lav || !hoy) return null;
+  return [b.id, b.regnr, b.estimert, Math.round((lav + hoy) / 2), km || null, u, Number(b.hoyeste_bud) || null, b.kilde,
+    [b.merke, b.modell, b.aar].filter(Boolean).join(' '), lav, hoy, null, null, Number(b.aar) || null, null];
+}
+
+async function hentExcel() {
   const r = await fetch(ERP_XLSX_URL);
   if (!r.ok) throw new Error('ERP-eksport ' + r.status);
   const wb = XLSX.read(Buffer.from(await r.arrayBuffer()), { type: 'buffer' });
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
-  const b = rows.slice(1).map(radFra).filter(Boolean);
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+}
+
+// Km per internnr fra Excel, funnet etter kolonnenavn (ikke posisjon).
+function kmFraExcel(rows) {
+  const h = (rows[0] || []).map((x) => String(x == null ? '' : x).trim().toLowerCase());
+  const iId = h.indexOf('internnr.'), iKm = h.indexOf('km');
+  const ut = {};
+  if (iId < 0 || iKm < 0) return ut;
+  for (const x of rows.slice(1)) if (x[iId] != null && Number(x[iKm])) ut[String(x[iId])] = Number(x[iKm]);
+  return ut;
+}
+
+function lesBilfil() {
+  try {
+    const d = JSON.parse(fs.readFileSync(BILFIL, 'utf8'));
+    if (Date.now() - Date.parse(d.bygget) > 24 * 3600e3) return null;
+    return d;
+  } catch (_) { return null; }
+}
+
+async function bygg(opts) {
+  const rows = await hentExcel();
+  const bilfil = opts && opts.excel ? null : lesBilfil();
+  let b, kilde;
+  if (bilfil) {
+    const km = kmFraExcel(rows);
+    b = bilfil.biler.map((x) => radFraBil(x, km[String(x.id)])).filter(Boolean);
+    kilde = 'bilfil ' + bilfil.bygget + ' + km fra Excel';
+  } else {
+    b = rows.slice(1).map(radFra).filter(Boolean);
+    kilde = 'Excel';
+  }
   const fu = finnUtprisMap();
   const st = lesState();
   const veg = lesJson(VEG_STATE);
@@ -67,7 +110,7 @@ async function bygg() {
     const v = veg[String(r[1]).toUpperCase()];
     if (v && v.fom && v.fom <= r[2]) r[14] = Math.round((Date.parse(r[2]) - Date.parse(v.fom)) / (365.25 * 864e5) * 10) / 10;
   }
-  return { versjon: VERSJON, bygget: new Date().toISOString(), b };
+  return { versjon: VERSJON, bygget: new Date().toISOString(), kilde, b };
 }
 
 // Vår Finn-utpris per internnr fra botens dossierer (jr/dossiers/<internnr>-<regnr>.json).
@@ -155,7 +198,7 @@ async function pushTilPages(data, token) {
   }
 }
 
-module.exports = { VERSJON, utfall, radFra, finnUtprisMap };
+module.exports = { VERSJON, utfall, radFra, radFraBil, kmFraExcel, finnUtprisMap, bygg };
 
 if (require.main === module) {
   require('dotenv').config({ path: path.join(__dirname, '.env'), override: true, quiet: true });
