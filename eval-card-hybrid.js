@@ -397,6 +397,10 @@ function formatEvalCardHybrid(p, forErp = false) {
         : (!Number.isFinite(lav) ? ffKr(hoy, false)
           : (Math.round(lav).toLocaleString('nb-NO') + ' – ' + Math.round(hoy).toLocaleString('nb-NO'))));
     lines.push(`Lav – høy:       ${lh}`);
+    // v20.174: spenn bare oppover, prosent fra Innstillinger → Fossefall-satser → Spenn opp.
+    if (arm.spenn_modus === 'opp-pst' && arm.spenn_pct != null) {
+      lines.push(`Spenn:           lav = Peasy-bud, høy + ${String(arm.spenn_pct).replace('.', ',')} % (Innstillinger)`);
+    }
     const avLin = ffAvvikLine(arm);
     if (avLin) lines.push(avLin);
     if (val.dLav != null && val.dLav <= 0) lines.push('QA: D lav ≤ 0 — ugyldig kalkyle, ikke send');

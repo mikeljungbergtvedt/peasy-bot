@@ -46,7 +46,7 @@ const ff = require('./fossefall');
   assert.strictEqual(ff.egenvektOmregSpenn({ year: 2024, isVarebil: true }), 0);
 }
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.160');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.174');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -542,6 +542,30 @@ delete process.env.FOSSEFALL_TABLES_LIVE;
   const none = ff.computeSharedFossefall(Object.assign(ctx(), { satser, profile: 'a' }));
   assert.ok(none.salaer_ar === 0 || Object.is(none.salaer_ar, -0));
   assert.strictEqual(none.ar_bud, 143468 - 20000);
+}
+
+// v20.174: spenn bare oppover i prosent av lav, fra Innstillinger (fossefallSatser.spennOpp). Lav = midt.
+{
+  const medOpp = Object.assign({}, satser, { spennOpp: { pct: { u50: 7, '50-120': 8, '120-200': 10, '200-300': 12, o300: 12 }, min: 3000, max: 60000 } });
+  const full = ff.buildFossefall(Object.assign(ctx(), { satser: medOpp }));
+  for (const k of ['a', 'b', 'ordna']) {
+    const x = full[k];
+    assert.strictEqual(x.lav, x.peasy_bud_mid, k + ': lav = midt');
+    assert.strictEqual(x.spenn_modus, 'opp-pst');
+    assert.strictEqual(x.spenn_pct, 8);
+    assert.strictEqual(x.hoy - x.lav, Math.max(3000, Math.round(x.peasy_bud_mid * 0.08 / 1000) * 1000), k + ': opp = 8 % av lav');
+  }
+  assert.strictEqual(full.b.peasy_bud_mid, Math.round(full.a.peasy_bud_mid * 0.9 / 1000) * 1000);
+  // Min og maks klemmer opp.
+  const s1 = ff.spennForMidt(medOpp, { kmId: 'u50', spenn: { ned: 1, opp: 1 } }, 20000);
+  assert.deepStrictEqual([s1.ned, s1.opp], [0, 3000]);
+  const s2 = ff.spennForMidt(medOpp, { kmId: 'o300', spenn: { ned: 1, opp: 1 } }, 900000);
+  assert.deepStrictEqual([s2.ned, s2.opp], [0, 60000]);
+  // Uten spennOpp, eller uten prosent for km-båndet: spenntabellen som før.
+  const s3 = ff.spennForMidt(satser, { kmId: 'u50', spenn: { ned: 20000, opp: 13000 } }, 200000);
+  assert.deepStrictEqual([s3.ned, s3.opp, s3.modus], [20000, 13000, 'tabell']);
+  const s4 = ff.spennForMidt({ spennOpp: { pct: { u50: 7 } } }, { kmId: 'o300', spenn: { ned: 20000, opp: 13000 } }, 200000);
+  assert.strictEqual(s4.modus, 'tabell');
 }
 console.log('fossefall.test.js ok');
   console.log('  celle', a.celleId, 'midt', a.peasy_bud_mid, 'lav/hoy', a.lav, a.hoy);

@@ -23,7 +23,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.160';
+const FOSSEFALL_VERSION = 'v20.174';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -796,6 +796,24 @@ function parseSpenn(v) {
 }
 
 /**
+ * v20.174: spenn bare oppover, i prosent av lav (= Peasy-bud-midt for armen). Leses fra Innstillinger:
+ *   fossefallSatser.spennOpp = { pct: { <km-id>: prosent }, min: kr, max: kr }
+ * Ingen tall i koden. Mangler spennOpp eller prosent for km-båndet → spenntabellen (ned|opp) som før.
+ */
+function spennForMidt(satser, looked, mid) {
+  const so = satser && satser.spennOpp;
+  const pct = so && so.pct ? Number(so.pct[looked.kmId]) : NaN;
+  if (!Number.isFinite(pct) || pct < 0 || !Number.isFinite(Number(mid))) {
+    return { ned: looked.spenn.ned, opp: looked.spenn.opp, modus: 'tabell', pct: null };
+  }
+  let opp = Math.round((Number(mid) * pct) / 100 / 1000) * 1000;
+  const min = Number(so.min), max = Number(so.max);
+  if (Number.isFinite(min) && opp < min) opp = min;
+  if (Number.isFinite(max) && max > 0 && opp > max) opp = max;
+  return { ned: 0, opp, modus: 'opp-pst', pct };
+}
+
+/**
  * Slå opp én celle. Tom/manglende celle → ok:false (ikke nabo, ikke interpolering).
  * margin klemmes med radens min/max når de finnes.
  */
@@ -896,8 +914,6 @@ function computeSharedFossefall(opts) {
   const margin = looked.margin;
   const marginRaw = looked.marginRaw;
   const takst = looked.takst;
-  const ned = looked.spenn.ned;
-  const opp = looked.spenn.opp;
   const statidKr = Number(opts.statidKr) || 0;
 
   // v20.152: ståtid inn i AR-bud, over Peasy-avgiften. Fossefallet er
@@ -914,6 +930,9 @@ function computeSharedFossefall(opts) {
   // Rund midt først, så lav/høy fra den midten ± spenn.
   const midRaw = arBud - fee;
   const peasyBudMid = roundKr(midRaw);
+  const sp = spennForMidt(satser, looked, peasyBudMid);
+  const ned = sp.ned;
+  const opp = sp.opp;
   const lav = peasyBudMid - ned;
   const hoy = peasyBudMid + opp;
   const midAvr = peasyBudMid - midRaw;
@@ -958,6 +977,8 @@ function computeSharedFossefall(opts) {
     forhandler_verdi: verdiForSalaer,
     usikkerhet_takst: { lav: -ned, hoy: opp },
     spenn: { lav: -ned, hoy: opp },
+    spenn_modus: sp.modus,
+    spenn_pct: sp.pct,
     forhandlermargin_tillegg_bud: emptySide(),
     ordna_trekk: emptySide(),
     vrakpant_gulv: emptySide(),
@@ -1086,10 +1107,11 @@ function buildSharedFossefall(opts) {
     const scale = ARM_SCALE[profileId];
     if (scale == null) return skipArm(profileId, 'ukjent profil');
     if (profileId === 'a' || scale === 1) return aArm;
-    const ned = looked.spenn.ned;
-    const opp = looked.spenn.opp;
     const midA = Number(aArm.peasy_bud_mid != null ? aArm.peasy_bud_mid : aArm.estimertPeasyBud);
     const mid = roundKr(midA * scale);
+    const sp = spennForMidt(satser, looked, mid);
+    const ned = sp.ned;
+    const opp = sp.opp;
     const out = Object.assign({}, aArm, {
       profile: profileId,
       profil: (PROFILES[profileId] && PROFILES[profileId].label) || profileId,
@@ -1099,6 +1121,8 @@ function buildSharedFossefall(opts) {
       hoy: mid + opp,
       usikkerhet_takst: { lav: -ned, hoy: opp },
       spenn: { lav: -ned, hoy: opp },
+      spenn_modus: sp.modus,
+      spenn_pct: sp.pct,
       arm_scale: scale,
       scaled_from: 'a',
     });
@@ -1323,6 +1347,7 @@ function buildFossefall(opts) {
 }
 
 module.exports = {
+  spennForMidt,
   FOSSEFALL_VERSION,
   ARM_SCALE,
   PROFILES,
