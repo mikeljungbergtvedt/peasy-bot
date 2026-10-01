@@ -7,7 +7,11 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+
+const require = createRequire(import.meta.url);
+const fossefall = require('../fossefall.js');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MEASUREMENTS_FILE = path.join(__dirname, 'logs.nosync', 'measurements.jsonl');
@@ -17,7 +21,17 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function recordMeasurement(run, easyEval) {
+// Behold arm-feltene Pulse-kortet leser. Ikke kok spenn til én streng, ikke sløyf avsetning_takst.
+function publishedFossefall(easyEval) {
+  const raw = easyEval && easyEval.fossefall;
+  if (!raw || typeof raw !== 'object') return null;
+  if (!raw.a && !raw.b && !raw.ordna) return raw;
+  const card = fossefall.fossefallQaCard(raw);
+  if (!card) return raw;
+  return Object.assign({}, raw, card);
+}
+
+export function measurementFromRun(run, easyEval) {
   const anchor  = run?.steps?.anchor || {};
   const pricing = run?.steps?.pricing || {};
   const id      = anchor.identifikasjon || {};
@@ -29,6 +43,7 @@ export async function recordMeasurement(run, easyEval) {
   const easyAnker = num(easyEval?.anker);
   const easyDLav  = num(easyEval?.dLav);
   const easyDHoy  = num(easyEval?.dHoy);
+  const fossefallCard = publishedFossefall(easyEval);
 
   const record = {
     regnr: run.regnr,
@@ -46,6 +61,8 @@ export async function recordMeasurement(run, easyEval) {
       model_year: id.model_year ?? null,
     },
 
+    fossefall: fossefallCard,
+
     easy: easyEval ? {
       anker: easyAnker,
       dLav: easyDLav,
@@ -57,6 +74,7 @@ export async function recordMeasurement(run, easyEval) {
       bracket: easyEval.bracket || null,
       anchor_reason: easyEval.anchor_reason || null,
       km_override: easyEval.km_override || null,
+      fossefall: fossefallCard,
     } : null,
 
     km_override: (easyEval && easyEval.km_override) || null,
@@ -97,6 +115,11 @@ export async function recordMeasurement(run, easyEval) {
     log_file: run.log_file ?? null,
     has_errors: (run.errors || []).length > 0,
   };
+  return record;
+}
+
+export async function recordMeasurement(run, easyEval) {
+  const record = measurementFromRun(run, easyEval);
 
   try {
     await fs.mkdir(path.dirname(MEASUREMENTS_FILE), { recursive: true });

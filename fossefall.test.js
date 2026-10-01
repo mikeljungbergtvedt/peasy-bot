@@ -5,7 +5,8 @@
 const assert = require('assert');
 const ff = require('./fossefall');
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.146');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.147');
+assert.deepStrictEqual(ff.ARM_SCALE, { a: 1, b: 0.9, ordna: 0.75 });
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
@@ -114,16 +115,20 @@ assert.strictEqual(a.avsetning_takst, o.avsetning_takst);
 assert.strictEqual(a.omregistrering, b.omregistrering);
 assert.strictEqual(a.peasy_avgift.lav, b.peasy_avgift.lav);
 assert.strictEqual(a.peasy_avgift.lav, o.peasy_avgift.lav);
-assert.strictEqual(a.peasy_bud_mid, b.peasy_bud_mid);
-assert.strictEqual(b.peasy_bud_mid, o.peasy_bud_mid);
 assert.strictEqual(a.estimertPeasyBud, a.peasy_bud_mid);
-assert.strictEqual(b.estimertPeasyBud, a.estimertPeasyBud);
-assert.strictEqual(o.estimertPeasyBud, a.estimertPeasyBud);
+assert.strictEqual(b.estimertPeasyBud, b.peasy_bud_mid);
+assert.strictEqual(o.estimertPeasyBud, o.peasy_bud_mid);
 assert.strictEqual(a.profile, 'a');
 assert.strictEqual(b.profile, 'b');
 assert.strictEqual(o.profile, 'ordna');
-assert.strictEqual(a.profil_mult, undefined);
-// 180k×80k: rå midt 113568 rundes til 114000, deretter spenn 20000|13000.
+assert.strictEqual(a.profil_mult, 1);
+assert.strictEqual(b.profil_mult, 0.9);
+assert.strictEqual(o.profil_mult, 0.75);
+assert.strictEqual(b.peasy_bud_mid, ff._internal.roundKr(a.peasy_bud_mid * ff.ARM_SCALE.b));
+assert.strictEqual(o.peasy_bud_mid, ff._internal.roundKr(a.peasy_bud_mid * ff.ARM_SCALE.ordna));
+assert.notStrictEqual(a.peasy_bud_mid, b.peasy_bud_mid);
+assert.notStrictEqual(b.peasy_bud_mid, o.peasy_bud_mid);
+// 180k×80k: rå midt 113568 rundes til 114000, deretter ARM_SCALE og spenn 20000|13000.
 assert.strictEqual(ff._internal.roundKr(113500), 114000);
 assert.strictEqual(ff._internal.roundKr(113499), 113000);
 assert.strictEqual(a.peasy_bud_mid, ff._internal.roundKr(a.ar_bud + a.peasy_avgift.lav));
@@ -136,12 +141,16 @@ assert.strictEqual(a.lav, 94000);
 assert.strictEqual(a.hoy, 127000);
 assert.strictEqual(a.lav, a.peasy_bud_mid - 20000);
 assert.strictEqual(a.hoy, a.peasy_bud_mid + 13000);
-assert.strictEqual(b.lav, a.lav);
-assert.strictEqual(o.lav, a.lav);
-assert.strictEqual(b.hoy, a.hoy);
-assert.strictEqual(o.hoy, a.hoy);
-assert.deepStrictEqual(b.forhandlermargin_tillegg_bud, { lav: 0, hoy: 0 });
-assert.deepStrictEqual(o.ordna_trekk, { lav: 0, hoy: 0 });
+assert.strictEqual(b.lav, b.peasy_bud_mid - 20000);
+assert.strictEqual(o.lav, o.peasy_bud_mid - 20000);
+assert.strictEqual(b.hoy, b.peasy_bud_mid + 13000);
+assert.strictEqual(o.hoy, o.peasy_bud_mid + 13000);
+assert.deepStrictEqual(a.spenn, { lav: -20000, hoy: 13000 });
+assert.deepStrictEqual(a.usikkerhet_takst, { lav: -20000, hoy: 13000 });
+assert.strictEqual(typeof a.spenn.lav, 'number');
+assert.strictEqual(typeof a.spenn.hoy, 'number');
+assert.deepStrictEqual(b.forhandlermargin_tillegg_bud, { lav: b.peasy_bud_mid - a.peasy_bud_mid, hoy: b.peasy_bud_mid - a.peasy_bud_mid });
+assert.deepStrictEqual(o.ordna_trekk, { lav: o.peasy_bud_mid - a.peasy_bud_mid, hoy: o.peasy_bud_mid - a.peasy_bud_mid });
 const notAScale = ff.computeSharedFossefall(Object.assign(ctx(), { profile: 0.75 }));
 assert.strictEqual(notAScale.skip, true);
 
@@ -173,11 +182,12 @@ assert.strictEqual(shadow.tables_live, false);
 assert.strictEqual(shadow.engine, 'hardcoded');
 assert.strictEqual(shadow.a.klargjoring, -5000);
 assert.strictEqual(shadow.fossefall_v2.a.klargjoring, -1000);
-assert.strictEqual(shadow.fossefall_v2.a.peasy_bud_mid, shadow.fossefall_v2.b.peasy_bud_mid);
-assert.strictEqual(shadow.fossefall_v2.b.peasy_bud_mid, shadow.fossefall_v2.ordna.peasy_bud_mid);
+assert.strictEqual(shadow.fossefall_v2.b.peasy_bud_mid, ff._internal.roundKr(shadow.fossefall_v2.a.peasy_bud_mid * 0.9));
+assert.strictEqual(shadow.fossefall_v2.ordna.peasy_bud_mid, ff._internal.roundKr(shadow.fossefall_v2.a.peasy_bud_mid * 0.75));
 assert.strictEqual(shadow.fossefall_v2.estimertPeasyBud, shadow.fossefall_v2.a.peasy_bud_mid);
-assert.strictEqual(shadow.fossefall_v2.a.lav, shadow.fossefall_v2.b.lav);
-assert.strictEqual(shadow.fossefall_v2.b.hoy, shadow.fossefall_v2.ordna.hoy);
+assert.strictEqual(shadow.fossefall_v2.a.avsetning_takst, -13000);
+assert.strictEqual(shadow.fossefall_v2.b.avsetning_takst, shadow.fossefall_v2.a.avsetning_takst);
+assert.deepStrictEqual(shadow.fossefall_v2.a.spenn, { lav: -20000, hoy: 13000 });
 assert.strictEqual(ff.verifyLag(shadow.a).ok, true, JSON.stringify(ff.verifyLag(shadow.a)));
 assert.strictEqual(ff.verifyLag(shadow.fossefall_v2.a).ok, true, JSON.stringify(ff.verifyLag(shadow.fossefall_v2.a)));
 assert.strictEqual(ff.verifyLag(shadow.fossefall_v2.b).ok, true, JSON.stringify(ff.verifyLag(shadow.fossefall_v2.b)));
@@ -191,11 +201,11 @@ assert.strictEqual(live.engine, 'fossefallSatser');
 assert.strictEqual(live.a.klargjoring, -1000);
 assert.strictEqual(live.b.klargjoring, -1000);
 assert.strictEqual(live.ordna.klargjoring, -1000);
-assert.strictEqual(live.a.peasy_bud_mid, live.b.peasy_bud_mid);
-assert.strictEqual(live.b.peasy_bud_mid, live.ordna.peasy_bud_mid);
+assert.strictEqual(live.b.peasy_bud_mid, ff._internal.roundKr(live.a.peasy_bud_mid * ff.ARM_SCALE.b));
+assert.strictEqual(live.ordna.peasy_bud_mid, ff._internal.roundKr(live.a.peasy_bud_mid * ff.ARM_SCALE.ordna));
 assert.strictEqual(live.estimertPeasyBud, live.a.peasy_bud_mid);
-assert.strictEqual(live.a.lav, live.b.lav);
-assert.strictEqual(live.a.hoy, live.ordna.hoy);
+assert.strictEqual(live.b.lav, live.b.peasy_bud_mid - 20000);
+assert.strictEqual(live.ordna.hoy, live.ordna.peasy_bud_mid + 13000);
 assert.strictEqual(live.lav, live.a.lav);
 assert.strictEqual(live.hoy, live.a.hoy);
 assert.strictEqual(live.celleId, '150-250|50-120');
@@ -256,8 +266,8 @@ assert.ok(low.a.peasy_bud_mid >= 0, 'midt negativ ' + low.a.peasy_bud_mid);
 assert.ok(low.b.peasy_bud_mid >= 3000, 'b midt ' + low.b.peasy_bud_mid);
 assert.ok(low.ordna.peasy_bud_mid >= 3000, 'ordna midt ' + low.ordna.peasy_bud_mid);
 assert.strictEqual(low.estimertPeasyBud, low.a.peasy_bud_mid);
-assert.strictEqual(low.a.peasy_bud_mid, low.b.peasy_bud_mid);
-assert.strictEqual(low.b.peasy_bud_mid, low.ordna.peasy_bud_mid);
+assert.strictEqual(typeof low.a.avsetning_takst, 'number');
+assert.strictEqual(low.b.avsetning_takst, low.a.avsetning_takst);
 assert.ok(low.a.lav >= 3000, 'lav ' + low.a.lav);
 assert.ok(low.a.hoy >= 5000, 'hoy ' + low.a.hoy);
 assert.ok(low.b.lav >= 3000 && low.ordna.lav >= 3000);
@@ -278,8 +288,8 @@ const stood = ff.buildFossefall(Object.assign(ctx(), {
 assert.ok(stood.a.statid < 0, 'statid ' + stood.a.statid);
 assert.strictEqual(stood.b.statid, stood.a.statid);
 assert.strictEqual(stood.ordna.statid, stood.a.statid);
-assert.strictEqual(stood.a.peasy_bud_mid, stood.b.peasy_bud_mid);
-assert.strictEqual(stood.b.peasy_bud_mid, stood.ordna.peasy_bud_mid);
+assert.strictEqual(stood.b.peasy_bud_mid, ff._internal.roundKr(stood.a.peasy_bud_mid * ff.ARM_SCALE.b));
+assert.strictEqual(stood.ordna.peasy_bud_mid, ff._internal.roundKr(stood.a.peasy_bud_mid * ff.ARM_SCALE.ordna));
 assert.strictEqual(stood.estimertPeasyBud, stood.a.peasy_bud_mid);
 assert.notStrictEqual(stood.a.peasy_bud_mid, live.a.peasy_bud_mid);
 assert.strictEqual(
@@ -288,8 +298,8 @@ assert.strictEqual(
 );
 assert.strictEqual(stood.a.lav, stood.a.peasy_bud_mid - 20000);
 assert.strictEqual(stood.a.hoy, stood.a.peasy_bud_mid + 13000);
-assert.strictEqual(stood.a.lav, stood.b.lav);
-assert.strictEqual(stood.a.hoy, stood.ordna.hoy);
+assert.strictEqual(stood.b.lav, stood.b.peasy_bud_mid - 20000);
+assert.strictEqual(stood.ordna.hoy, stood.ordna.peasy_bud_mid + 13000);
 assert.strictEqual(stood.a.peasy_avgift.lav, live.a.peasy_avgift.lav);
 assert.strictEqual(stood.a.forhandlermargin, -38000);
 assert.strictEqual(ff.verifyLag(stood.a).ok, true, JSON.stringify(ff.verifyLag(stood.a)));
@@ -305,6 +315,56 @@ assert.strictEqual(odd.peasy_bud_mid, ff._internal.roundKr(oddRaw));
 assert.strictEqual(odd.lav, odd.peasy_bud_mid - 2500);
 assert.strictEqual(odd.hoy, odd.peasy_bud_mid + 1300);
 assert.notStrictEqual(odd.lav, ff._internal.roundKr(oddRaw - 2500));
+
+// QA-kort / measurement-sample: avsetning_takst er eget felt, spenn er lav og høy, midter skiller armene.
+const card = ff.fossefallQaCard(live);
+assert.ok(card && card.a && card.b && card.ordna);
+for (const arm of [card.a, card.b, card.ordna]) {
+  assert.strictEqual(typeof arm.avsetning_takst, 'number');
+  assert.strictEqual(arm.avsetning_takst, -13000);
+  assert.notStrictEqual(arm.avsetning_takst, arm.peasy_bud_mid);
+  assert.strictEqual(typeof arm.forhandlermargin, 'number');
+  assert.strictEqual(typeof arm.statid, 'number');
+  assert.strictEqual(typeof arm.omregistrering, 'number');
+  assert.strictEqual(typeof arm.klargjoring, 'number');
+  assert.strictEqual(typeof arm.peasy_avgift.lav, 'number');
+  assert.strictEqual(typeof arm.peasy_avgift.hoy, 'number');
+  assert.strictEqual(typeof arm.peasy_bud_mid, 'number');
+  assert.ok(arm.spenn && typeof arm.spenn === 'object');
+  assert.strictEqual(typeof arm.spenn.lav, 'number');
+  assert.strictEqual(typeof arm.spenn.hoy, 'number');
+  assert.deepStrictEqual(arm.usikkerhet_takst, arm.spenn);
+}
+assert.strictEqual(card.a.peasy_bud_mid, 114000);
+assert.strictEqual(card.b.peasy_bud_mid, ff._internal.roundKr(114000 * 0.9));
+assert.strictEqual(card.ordna.peasy_bud_mid, ff._internal.roundKr(114000 * 0.75));
+assert.deepStrictEqual(card.arm_scale, { a: 1, b: 0.9, ordna: 0.75 });
+const sample = JSON.parse(JSON.stringify({ fossefall: card }));
+assert.strictEqual(sample.fossefall.a.avsetning_takst, -13000);
+assert.strictEqual(sample.fossefall.a.spenn.lav, -20000);
+assert.strictEqual(sample.fossefall.a.spenn.hoy, 13000);
+assert.notStrictEqual(sample.fossefall.a.peasy_bud_mid, sample.fossefall.b.peasy_bud_mid);
+
+// En sammenslått spenn-streng på vei inn splittes før publisering.
+const split = ff.fossefallQaCard({
+  a: {
+    avsetning_takst: -13000,
+    peasy_bud_mid: 114000,
+    forhandlermargin: -38000,
+    statid: 0,
+    omregistrering: -4532,
+    klargjoring: -1000,
+    peasy_avgift: { lav: -9900, hoy: -9900 },
+    spenn: '20000|13000',
+  },
+  b: { peasy_bud_mid: 103000, avsetning_takst: -13000, spenn: { lav: -20000, hoy: 13000 } },
+  ordna: { peasy_bud_mid: 86000, avsetning_takst: -13000, usikkerhet_takst: { lav: -20000, hoy: 13000 } },
+});
+assert.deepStrictEqual(split.a.spenn, { lav: -20000, hoy: 13000 });
+assert.strictEqual(typeof split.a.spenn, 'object');
+assert.strictEqual(split.a.avsetning_takst, -13000);
+assert.strictEqual(split.b.peasy_bud_mid, 103000);
+assert.strictEqual(split.ordna.peasy_bud_mid, 86000);
 
 delete process.env.FOSSEFALL_TABLES_LIVE;
 delete process.env.FOSSEFALL_HARDCODED_FALLBACK;
