@@ -46,6 +46,17 @@ const dag = (v) => {
   return Number.isFinite(t) ? new Date(t).toLocaleDateString('sv-SE', { timeZone: 'Europe/Oslo' }) : s.slice(0, 10);
 };
 
+// Tidsstempel → «dd.mm.yyyy HH:MM» i norsk tid, slik Excel skriver O, P, Q og AF. «dd.mm.yyyy hh:mm» fra cars/{id} står som det er.
+const tid = (v) => {
+  if (!v) return null;
+  const s = String(v);
+  if (/^\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/.test(s)) return s.slice(0, 16);
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) return null;
+  const p = Object.fromEntries(new Intl.DateTimeFormat('nb-NO', { timeZone: 'Europe/Oslo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+  return `${p.day}.${p.month}.${p.year} ${p.hour}:${p.minute}`;
+};
+
 async function login() {
   const r = await fetch(ERP + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: process.env.ERP_USER, password: process.env.ERP_PASS }) });
@@ -62,6 +73,7 @@ function bil(liste, x) {
     merke: d.manufacturer_name || x.manufacturer || null, modell: d.model_series || null, aar: num(d.model_year),
     postnr: u.zip || null, sted: u.city || null,
     sd_mottatt: dag(m.sd_created_at), estimert: dag(m.fe_created_at), avvist: dag(m.rejected_at),
+    sd_tid: tid(m.sd_created_at), estimert_tid: tid(m.fe_created_at),
     solgt: dag(x.car && x.car.sold_date), hentet_retur: dag(x.collected_at), registrert: dag(x.created_at),
     avvist_grunn_id: num(x.reject_reason_id), avvist_kommentar: x.reject_reason_comment || null,
     finans: !!(x.encumbrance && x.encumbrance.any_debts), // Excel skriver FALSE også når heftelsessjekk mangler
@@ -91,16 +103,22 @@ function berikFelt(r, liste) {
   const avvist = liste === 'rejected';
   const siste = (f) => { const l = r.log.filter(f).pop(); return l ? dag(l[0]) : null; };
   const forste = (f) => { const l = r.log.find(f); return l ? dag(l[0]) : null; };
+  const sisteTid = (f) => { const l = r.log.filter(f).pop(); return l ? tid(l[0]) : null; };
   const status = (st) => (l) => l[1] === 'status.changed' && l[2] === st;
   const sb = r.story.length ? r.story[r.story.length - 1] : [];
   return {
-    bud: r.bud || sb[0] || null, avgift: r.avgift || sb[1] || null, km: r.km || null, finans: r.gjeld,
+    // 0 = bilen har budrunde, men ikke bud ennå (Excel skriver 0). null = ingen budrunde.
+    bud: r.bud || sb[0] || (r.bud === 0 ? 0 : null), avgift: r.avgift || sb[1] || (r.avgift === 0 ? 0 : null), km: r.km || null, finans: r.gjeld,
     // Avviste biler: Excel følger egne regler for P/Q (tomt eller siste bestilling). Vi lar dem stå tomme.
     gire_bestilt: r.selv || avvist ? null : (siste((l) => l[1] === 'order_delivery.success') || siste(status('AR_CAR_CREATED')) || dag(r.ms.otw)),
     levere_selv: !r.selv || avvist ? null : (dag(r.ms.otw) || siste((l) => l[1] === 'order_delivery.self')), // eldre biler: faktisk levert (milepæl), nyere: valgt i loggen
     mottatt: forste(status('RECEIVED')) || dag(r.ms.mottatt),
     // V = returned_at (tidspunktet bilen ble satt til retur), ellers siste TO_BE_RETURNED / RETURNED i loggen.
     returnert: dag(r.ms.retur) || siste(status('TO_BE_RETURNED')) || siste(status('RETURNED')),
+    registrert_logg: r.log.length ? dag(r.log[0][0]) : null, // første hendelse (CREATE logges ikke alltid)
+    // Klokkeslett for P og Q (samme regler som datoene over).
+    gire_tid: r.selv || avvist ? null : (sisteTid((l) => l[1] === 'order_delivery.success') || sisteTid(status('AR_CAR_CREATED')) || tid(r.ms.otw)),
+    levere_tid: !r.selv || avvist ? null : (tid(r.ms.otw) || sisteTid((l) => l[1] === 'order_delivery.self')),
   };
 }
 

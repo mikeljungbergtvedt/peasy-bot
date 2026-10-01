@@ -157,11 +157,10 @@ async function main() {
   const files = measurementsFiles();
   if (!files.length) { console.error('backsync FEIL: fant ingen measurements-filer'); process.exit(1); }
 
-  const XLSX = require('xlsx');
-  const res = await fetch(XLSX_URL);
-  if (!res.ok) { console.error('backsync FEIL: ERP-rapport HTTP ' + res.status); process.exit(1); }
-  const wb = XLSX.read(Buffer.from(await res.arrayBuffer()), { type: 'buffer', cellDates: true });
-  const rows = require('./excel-kolonner').kanon(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 })); // etter kolonnenavn
+  // Excel som før; feiler den, bilfila (endepunktene). ERP_RADER=bilfil bytter kilde. Samme kolonner.
+  let rows;
+  try { rows = await require('./bilfil-rader').hentRader({ excelUrl: XLSX_URL, xlsxOpts: { cellDates: true } }); }
+  catch (e) { console.error('backsync FEIL: ERP-rapport ' + e.message); process.exit(1); }
 
   const byId = new Map();
   for (const row of rows.slice(1)) {

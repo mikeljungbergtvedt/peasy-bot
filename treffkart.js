@@ -63,11 +63,9 @@ function radFraBil(b, km) {
     [b.merke, b.modell, b.aar].filter(Boolean).join(' '), lav, hoy, null, null, Number(b.aar) || null, null];
 }
 
+// Excel som før; feiler den, bilfila (samme kolonnenavn). ERP_RADER=bilfil bytter kilde.
 async function hentExcel() {
-  const r = await fetch(ERP_XLSX_URL);
-  if (!r.ok) throw new Error('ERP-eksport ' + r.status);
-  const wb = XLSX.read(Buffer.from(await r.arrayBuffer()), { type: 'buffer' });
-  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+  return require('./bilfil-rader').hentRader({ excelUrl: ERP_XLSX_URL });
 }
 
 // Km per internnr fra Excel, funnet etter kolonnenavn (ikke posisjon).
