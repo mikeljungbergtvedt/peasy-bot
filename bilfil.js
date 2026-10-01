@@ -97,7 +97,7 @@ function berikFelt(r, liste) {
     bud: r.bud || sb[0] || null, avgift: r.avgift || sb[1] || null, km: r.km || null, finans: r.gjeld,
     // Avviste biler: Excel følger egne regler for P/Q (tomt eller siste bestilling). Vi lar dem stå tomme.
     gire_bestilt: r.selv || avvist ? null : (siste((l) => l[1] === 'order_delivery.success') || siste(status('AR_CAR_CREATED')) || dag(r.ms.otw)),
-    levere_selv: !r.selv || avvist ? null : (siste((l) => l[1] === 'order_delivery.self') || dag(r.ms.otw)),
+    levere_selv: !r.selv || avvist ? null : (dag(r.ms.otw) || siste((l) => l[1] === 'order_delivery.self')), // eldre biler: faktisk levert (milepæl), nyere: valgt i loggen
     mottatt: forste(status('RECEIVED')) || dag(r.ms.mottatt),
     // V = returned_at (tidspunktet bilen ble satt til retur), ellers siste TO_BE_RETURNED / RETURNED i loggen.
     returnert: dag(r.ms.retur) || siste(status('TO_BE_RETURNED')) || siste(status('RETURNED')),
