@@ -1,5 +1,5 @@
 'use strict';
-// node vrakpant-absurd.test.js — billige biler går til vrakpant-gulvet, ikke «absurd midt/Finn» (v20.175, AE15238 03.10).
+// node vrakpant-absurd.test.js — alle biler følger fossefallet; lav under 3 000 løftes til 3 000 (v20.176, AE15238 03.10).
 // Satsene er et øyeblikksbilde av Innstillinger 03.10.2026 (vrakpant-absurd.fixture.json), så testen er lik hver gang.
 const assert = require('assert');
 const ff = require('./fossefall');
