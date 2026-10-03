@@ -23,7 +23,7 @@
  * Tom celle eller satser som ikke lar seg lese → PRIS MANUELT. Ingen interpolering, ingen oppdiktede satser.
  * FOSSEFALL_HARDCODED_FALLBACK=1: hvis live-flagget er på og tabellene feiler, behold gammel motor.
  */
-const FOSSEFALL_VERSION = 'v20.174';
+const FOSSEFALL_VERSION = 'v20.175';
 
 /** Locked 2026-09-23: midt A; B = A×0.9; Ordna = A×0.75; spenn lav/høy per midt. */
 const ARM_SCALE = { a: 1.0, b: 0.9, ordna: 0.75 };
@@ -203,6 +203,7 @@ function emptySide() {
 
 /** Felles gulv for A/B/Ordna: midt og lav ≥ 3000, høy ≥ 5000. Etter avrunding. Rad = løftet beløp. */
 const VRAKPANT_GULV_LAV = 3000;
+const ABSURD_FRA_FINN = 30000; // absurd midt/Finn-sperren gjelder fra denne Finn-prisen
 const VRAKPANT_GULV_HOY = 5000;
 function applyVrakpantGulv(lag) {
   if (!lag) return lag;
@@ -1084,8 +1085,10 @@ function buildSharedFossefall(opts) {
   }
 
   // Never ship absurd table hits (e.g. Finn 65k → midt 4k) as normal.
+  // v20.175: bare fra Finn 30 000. Under det er liten midt ekte (billig bil) og vrakpant-gulvet tar den,
+  // som når midt er negativ. Før: Finn 23 000 → midt 2 958 → PRIS MANUELT, mens Finn 15 000 fikk vrakpant (Mike 03.10).
   const midA0 = Number(aRaw.peasy_bud_mid != null ? aRaw.peasy_bud_mid : aRaw.estimertPeasyBud);
-  if (Number.isFinite(finn) && finn >= 20000 && Number.isFinite(midA0) && midA0 > 0 && midA0 < finn * 0.15) {
+  if (Number.isFinite(finn) && finn >= ABSURD_FRA_FINN && Number.isFinite(midA0) && midA0 > 0 && midA0 < finn * 0.15) {
     const grunn = 'absurd midt/Finn (' + Math.round(midA0) + '/' + Math.round(finn) + ') — PRIS MANUELT (sjekk satser)';
     const stamp = (profile) => {
       const arm = skipArm(profile, grunn);

@@ -46,7 +46,7 @@ const ff = require('./fossefall');
   assert.strictEqual(ff.egenvektOmregSpenn({ year: 2024, isVarebil: true }), 0);
 }
 
-assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.174');
+assert.strictEqual(ff.FOSSEFALL_VERSION, 'v20.175');
 assert.strictEqual(ff.KLARGJORING_KR, 1000);
 
 const satser = {
